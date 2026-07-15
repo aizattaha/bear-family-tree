@@ -1189,7 +1189,7 @@ window.renameTree=()=>{ const nuc=S.nuclei[S.session.nucleusId];
 function inviteDialog(code,forName){
   const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
   const mail='mailto:?subject='+encodeURIComponent('Join our family tree 🐻')
-    +'&body='+encodeURIComponent((forName?`This is a personal invite for ${forName}.\n\n`:'')
+    +'&body='+encodeURIComponent((forName?`${forName}, you're invited to join Bear Family Tree! 🐻\n\n`:'')
     +`Open this link, create an account, and you'll land in your place on the family tree:\n\n${link}\n\nInvite code (if asked): ${code}`);
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Invite${forName?' — '+esc(forName):''}</h3>
     <div class="card"><div class="label">Share this link</div>
@@ -1206,10 +1206,13 @@ function inviteDialog(code,forName){
   document.getElementById('inv_mail').onclick=()=>{ location.href=mail; }; }
 window.makeInvite=async()=>{ const code=await db.invite(); if(code)inviteDialog(code,null); };
 window.invitePerson=async(pid)=>{
-  const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId,person_id:pid})
-    .select('code').single();
+  const nm=displayName(pid); // the name YOU call them — "Kak Yana", not the full name
+  let {data,error}=await sb.from('tree_invite')
+    .insert({tree_id:ME.treeId,person_id:pid,invite_name:nm}).select('code').single();
+  if(error&&/invite_name/.test(error.message||'')) // upgrade-2 not run yet — invite still works, just unpersonalised
+    ({data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId,person_id:pid}).select('code').single());
   if(error){ dbErr(error); return; }
-  inviteDialog(data.code,person(pid).name); };
+  inviteDialog(data.code,nm); };
 window.makeSuper=async(nid,flag)=>{
   const {error}=await sb.rpc('set_super',{target:nid,flag});
   if(error){ toast((error.message||'failed').toLowerCase()); return; }
@@ -1263,20 +1266,31 @@ function addExpansionSilent(kind,pid){ computeVisible(); const key=kind+':'+pid;
 function loginCard(inner){ const el=document.getElementById('login');
   el.style.display='flex'; document.getElementById('app').style.display='none';
   el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`; return el; }
-function renderLogin(){
-  const el=loginCard(`<h1>Bear Family Tree</h1>
-    <div class="cap">${PENDING_INVITE?'you\'ve been invited 🐻 — create an account (or sign in) to take your place':'sign in — one login per household, shared or personal'}</div>
+function renderLogin(signup){
+  if(signup===undefined)signup=!!PENDING_INVITE; // invite links land on Create account
+  loginCard(`<h1>Bear Family Tree</h1>
+    ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`:''}
+    <div class="cap">${signup?'create your account — it takes ten seconds':'sign in — one login per household, shared or personal'}</div>
     <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" type="email" autocomplete="email"></div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" type="password" autocomplete="current-password"></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
     <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
-    <button class="btn primary" style="width:100%;" id="au_in">Sign in</button>
-    <button class="btn secondary" style="width:100%;margin-top:8px;" id="au_up">Create account</button>
+    ${signup
+      ?`<button class="btn primary" style="width:100%;" id="au_up">Create account</button>
+         <button class="link" id="au_sw" style="margin-top:12px;">already have an account? sign in</button>`
+      :`<button class="btn primary" style="width:100%;" id="au_in">Sign in</button>
+         <button class="btn secondary" style="width:100%;margin-top:8px;" id="au_up">Create account</button>`}
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
   const msg=t=>{document.getElementById('au_msg').textContent=t;};
   const creds=()=>({email:document.getElementById('au_email').value.trim(),
                     password:document.getElementById('au_pass').value});
-  document.getElementById('au_in').onclick=async()=>{ if(!sb)return;
+  if(PENDING_INVITE&&sb){ // personalise: "Kak Yana, you're invited to join Bear Family Tree!"
+    sb.rpc('invite_preview',{invite_code:PENDING_INVITE}).then(({data})=>{
+      const b=document.getElementById('inv_banner');
+      if(b&&data)b.textContent=data+", you're invited to join Bear Family Tree! 🐻"; }).catch(()=>{}); }
+  const sw=document.getElementById('au_sw'); if(sw)sw.onclick=()=>renderLogin(false);
+  const inBtn=document.getElementById('au_in');
+  if(inBtn)inBtn.onclick=async()=>{ if(!sb)return;
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     msg('signing in…');
     const {error}=await sb.auth.signInWithPassword(c);
