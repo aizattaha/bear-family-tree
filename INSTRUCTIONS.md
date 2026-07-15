@@ -62,7 +62,9 @@ The app is wired to the live Supabase project (`garbnserzkuazmvonfem`). Opening 
 1. **Personal claim-link (the good one):** open any *unclaimed* person's sheet → **✉ invite [name] to claim this profile** → share the link or hit *send by email*. Whoever opens it creates an account and lands directly as that person — single use, valid 14 days.
 2. **General code:** your own sheet → *Invite family* → **✉ create a code** — anyone with it can join and then claim/add themselves.
 
-*Note:* shareable links only work for the family once the app is **hosted on a real URL** (Netlify/Vercel) — a link to a file on your Mac means nothing on their phone. Until then, invites are codes + you'd send them the file. Hosting is the next step.
+**Inviting a friend to start their OWN tree:** your own sheet → *Invite a friend to start their own tree* → **✉ share**. The link (`…#newtree`) lands them on a create-account page with a "create your own family tree!" banner, then straight into the start-tree form — they become the first super user of a completely separate tree. Trees never see each other.
+
+**Tutorial:** every account walks through a 3-step tutorial on first entry (moving around · people & nicknames · making it yours). Reopen it any time from the **🎓** button in the top bar (hover: "tutorial").
 
 **Syncing:** every edit writes through to the cloud instantly; screens refresh whenever a window regains focus. For live push (~1s) updates, run `supabase/enable-realtime.sql` once in the SQL Editor — optional.
 
