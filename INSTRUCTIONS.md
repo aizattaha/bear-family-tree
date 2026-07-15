@@ -1,4 +1,6 @@
-# Bear Family Tree — first draft · how to run & use
+# Bear Family Tree — how to run & use
+
+**🌍 The family's home: https://bearfamilytree.netlify.app** — share nothing else; sign in there from any phone or computer. (`app/index.html` still works locally for tinkering; GitHub repo `aizattaha/bear-family-tree` auto-deploys on every push.)
 
 *Built July 2026 · follows Aizat's Personal Design System v2*
 
