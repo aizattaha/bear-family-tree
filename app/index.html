@@ -182,6 +182,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
     <button class="iconbtn" id="zoomOut">−</button>
     <button class="iconbtn" id="zoomIn">+</button>
     <button class="chip" id="homeBtn">◎ me</button>
+    <button class="iconbtn" id="tutBtn" title="tutorial">🎓</button>
   </div>
   <div id="viewport">
     <div id="world"><svg id="edges"></svg><div id="nodes"></div></div>
@@ -208,10 +209,14 @@ const APP_URL='https://bearfamilytree.netlify.app'; // the family's home — inv
 let MODE='demo';                       // 'cloud' after sign-in
 const ME={userId:null,nucleusId:null,treeId:null};
 let PENDING_INVITE=null;               // #invite=CODE in the link → survives the sign-up dance
+let PENDING_NEWTREE=null;              // #newtree → a friend starting their OWN tree
 try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/);
-  if(m){ localStorage.setItem('bft.pendingInvite',m[1]);
-    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){} }
-  PENDING_INVITE=localStorage.getItem('bft.pendingInvite'); }catch(e){}
+  if(m)localStorage.setItem('bft.pendingInvite',m[1]);
+  if(/newtree/.test(location.hash))localStorage.setItem('bft.pendingNewTree','1');
+  if(m||/newtree/.test(location.hash))
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  PENDING_INVITE=localStorage.getItem('bft.pendingInvite');
+  PENDING_NEWTREE=localStorage.getItem('bft.pendingNewTree'); }catch(e){}
 const isSuper=()=>MODE==='cloud'&&!!(S&&S.nuclei[ME.nucleusId]||{}).isSuper;
 /* ================= data ================= */
 const LS_KEY='bearFamilyTree.v7';
@@ -866,6 +871,7 @@ function centerOn(pid){ const p=layout.pos[pid]; if(!p)return;
 document.getElementById('zoomIn').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.2);};
 document.getElementById('zoomOut').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.2);};
 document.getElementById('homeBtn').onclick=()=>centerOn(viewing());
+document.getElementById('tutBtn').onclick=()=>openTutorial(false);
 document.getElementById('showall').onclick=resetView;
 
 /* ================= minimap ================= */
@@ -897,6 +903,31 @@ scrim.onclick=closeSheet;
 let toastT=null;
 function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg;
   t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+
+/* ================= tutorial (3 steps) ================= */
+let TUT_STEP=0, TUT_FORCED=false;
+const tutKey=()=>'bft.tutSeen.'+(MODE==='cloud'?ME.userId:'demo');
+function openTutorial(forced){ TUT_STEP=0; TUT_FORCED=!!forced; renderTutorial(); }
+function renderTutorial(){
+  const steps=[
+    {t:'Welcome to the tree 🐻',b:`This is a map of your family. <b>Drag</b> to move around, <b>scroll or pinch</b> to zoom, and tap <b>◎ me</b> any time to come home to yourself.<br><br>Tap a <b>⊕ chip</b> under a person to unfold their side of the family — one side opens at a time, so it never gets messy. <b>back to my view</b> folds everything again.`},
+    {t:'People',b:`<b>Click</b> a person once and a <b>＋</b> appears — tap it to add their parent, partner or child. <b>Double-click</b> opens their full card.<br><br>Set <b>your own nickname</b> for anyone — you'll see "Atok" where your cousin sees "Pak Cik". Everyone sees the tree in their own words.`},
+    {t:'Make it yours',b:`Open your own card to add <b>photos</b> (young kid · teen · adult), the name you go by, and where you live — the flag shows on your circle.<br><br>People you add start <b>unverified</b> — nearby family keeps their profiles right until they claim themselves. Anything you fill in helps the whole family.`}];
+  const s=steps[TUT_STEP];
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:8px;">${s.t}</h3>
+    <div style="text-align:center;margin-bottom:12px;">${steps.map((_,i)=>
+      `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin:0 3px;background:${i===TUT_STEP?'var(--primary)':'var(--muted)'};"></span>`).join('')}</div>
+    <div class="card" style="font-size:14px;line-height:22px;">${s.b}</div>
+    <div class="btnrow">
+      ${TUT_STEP>0?'<button class="btn secondary" id="tut_back">Back</button>':''}
+      <button class="btn primary" id="tut_next">${TUT_STEP<2?'Next':"Let's go 🐻"}</button></div>`);
+  if(TUT_FORCED)scrim.onclick=null; // first time: click through, no dismissing
+  const back=document.getElementById('tut_back');
+  if(back)back.onclick=()=>{ TUT_STEP--; renderTutorial(); };
+  document.getElementById('tut_next').onclick=()=>{
+    if(TUT_STEP<2){ TUT_STEP++; renderTutorial(); return; }
+    try{ localStorage.setItem(tutKey(),'1'); }catch(e){}
+    TUT_FORCED=false; scrim.onclick=closeSheet; closeSheet(); }; }
 
 /* ================= person sheet ================= */
 const SLOT_LABELS={k:'young kid',t:'teen · young adult',a:'adult'};
@@ -1151,6 +1182,8 @@ function openSelf(){ const per=person(viewing());
           ?`⭐ super${n.id!==ME.nucleusId?` · <button class="link" onclick="makeSuper('${n.id}',false)">remove</button>`:''}`
           :`<button class="link" onclick="makeSuper('${n.id}',true)">make super</button>`}</span></div>`).join('')}
       <div class="cap2" style="margin-top:6px;">super users create invites and can send personal claim-links from any unclaimed profile</div></div>`:''}
+    ${MODE==='cloud'?`<div class="card"><div class="nickrow"><span class="nickname">Invite a friend to start their own tree</span>
+      <button class="link" onclick="inviteFriend()">✉ share</button></div></div>`:''}
     <div class="card"><div class="label">Photos — young kid · teen · adult</div>
       <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div></div>
     <div class="fld"><span class="flabel">Full name</span><input id="f_name" value="${esc(per.name)}"></div>
@@ -1205,6 +1238,21 @@ function inviteDialog(code,forName){
     catch(e){ prompt('copy the link:',link); } };
   document.getElementById('inv_mail').onclick=()=>{ location.href=mail; }; }
 window.makeInvite=async()=>{ const code=await db.invite(); if(code)inviteDialog(code,null); };
+window.inviteFriend=()=>{
+  const link=(APP_URL||location.href.split('#')[0])+'#newtree';
+  const mail='mailto:?subject='+encodeURIComponent('Start your own family tree 🐻')
+    +'&body='+encodeURIComponent(`You're invited to create your own family tree on Bear Family Tree! 🐻\n\nOpen this link, create an account, and start your tree — you'll be its first super user:\n\n${link}`);
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Invite a friend</h3>
+    <div class="card"><div class="label">Share this link</div>
+      <div style="font-size:12px;line-height:17px;word-break:break-all;color:var(--ink-soft);">${esc(link)}</div></div>
+    <div class="btnrow">
+      <button class="btn secondary" id="fr_mail">send by email</button>
+      <button class="btn primary" id="fr_copy">copy link</button></div>
+    <p class="cap2" style="margin-top:10px;">they'll create an account and start a completely separate tree — as its own first super user. Your family's tree stays private to your family.</p>`);
+  document.getElementById('fr_copy').onclick=async()=>{
+    try{ await navigator.clipboard.writeText(link); toast('link copied'); }
+    catch(e){ prompt('copy the link:',link); } };
+  document.getElementById('fr_mail').onclick=()=>{ location.href=mail; }; };
 window.invitePerson=async(pid)=>{
   const nm=displayName(pid); // the name YOU call them — "Kak Yana", not the full name
   let {data,error}=await sb.from('tree_invite')
@@ -1267,9 +1315,10 @@ function loginCard(inner){ const el=document.getElementById('login');
   el.style.display='flex'; document.getElementById('app').style.display='none';
   el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`; return el; }
 function renderLogin(signup){
-  if(signup===undefined)signup=!!PENDING_INVITE; // invite links land on Create account
+  if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
   loginCard(`<h1>Bear Family Tree</h1>
-    ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`:''}
+    ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`
+     :PENDING_NEWTREE?`<div style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to create your own family tree! 🐻</div>`:''}
     <div class="cap">${signup?'create your account — it takes ten seconds':'sign in — one login per household, shared or personal'}</div>
     <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" type="email" autocomplete="email"></div>
     <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
@@ -1326,9 +1375,11 @@ async function enterCloud(){ MODE='cloud'; S=blankState();
   catch(e){ loginCard(`<h1>hmm</h1><div class="cap">couldn't load your tree — ${esc((e&&e.message)||e)}</div>
     <button class="btn secondary" style="width:100%;" onclick="location.reload()">try again</button>`); return; }
   if(!ok){ if(PENDING_INVITE){ renderJoinInvited(PENDING_INVITE); return; }
+    if(PENDING_NEWTREE){ renderStartTree(); return; }
     renderOnboarding(); return; }
   if(PENDING_INVITE){ try{localStorage.removeItem('bft.pendingInvite');}catch(e){}
     PENDING_INVITE=null; toast('invite ignored — you already have a place in this tree'); }
+  if(PENDING_NEWTREE){ try{localStorage.removeItem('bft.pendingNewTree');}catch(e){} PENDING_NEWTREE=null; }
   const members=nucleusMembers(ME.nucleusId);
   if(!members.length){ renderWhoAreYou(); return; }
   let prefs=null; try{ prefs=JSON.parse(localStorage.getItem('bft.prefs.'+ME.userId)); }catch(e){}
@@ -1347,29 +1398,7 @@ function renderOnboarding(){
       <span>Join with an invite code<span class="sub">someone in the family sent you a code</span></span></button>
     <button class="link" id="ob_out" style="margin-top:12px;">sign out</button>`);
   document.getElementById('ob_out').onclick=signOut;
-  document.getElementById('ob_new').onclick=()=>{
-    loginCard(`<h1>Start your tree</h1>
-      <div class="fld" style="text-align:left;"><span class="flabel">Your full name</span><input id="ob_name"></div>
-      <div class="fld" style="text-align:left;"><span class="flabel">Gender</span>
-        <select id="ob_gender"><option value="">—</option><option value="m">man</option><option value="f">woman</option></select></div>
-      <div class="fld" style="text-align:left;"><span class="flabel">Household name</span><input id="ob_label" placeholder="e.g. Aizat & Sarah's household"></div>
-      <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ob_tree" placeholder="e.g. BearFamily"></div>
-      <div id="ob_msg" class="cap" style="min-height:18px;"></div>
-      <button class="btn primary" style="width:100%;" id="ob_go">Create</button>`);
-    document.getElementById('ob_go').onclick=async()=>{
-      const name=document.getElementById('ob_name').value.trim();
-      const label=document.getElementById('ob_label').value.trim()||'our household';
-      const tn=document.getElementById('ob_tree').value.trim()||'our family';
-      if(!name){document.getElementById('ob_msg').textContent='your name is needed';return;}
-      document.getElementById('ob_msg').textContent='creating…';
-      const {error}=await sb.rpc('create_tree',{nucleus_label:label,tree_nm:tn});
-      if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
-      await cloudFetchAll();
-      const id=crypto.randomUUID();
-      const {error:e2}=await sb.from('person').insert({id,tree_id:ME.treeId,full_name:name,
-        gender:document.getElementById('ob_gender').value||null,claimed_by:ME.nucleusId});
-      if(e2){document.getElementById('ob_msg').textContent=(e2.message||'failed').toLowerCase();return;}
-      await cloudFetchAll(); startSession(ME.nucleusId,id); }; };
+  document.getElementById('ob_new').onclick=renderStartTree;
   document.getElementById('ob_join').onclick=()=>{
     loginCard(`<h1>Join the family</h1>
       <div class="fld" style="text-align:left;"><span class="flabel">Invite code</span><input id="ob_code"></div>
@@ -1390,6 +1419,33 @@ function renderOnboarding(){
       await cloudFetchAll();
       if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);
       else renderWhoAreYou(); }; }; }
+function renderStartTree(){
+  loginCard(`<h1>Start your tree</h1>
+    <div class="cap">you'll be its first super user — the keeper of the invites</div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Your full name</span><input id="ob_name"></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Gender</span>
+      <select id="ob_gender"><option value="">—</option><option value="m">man</option><option value="f">woman</option></select></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Household name</span><input id="ob_label" placeholder="e.g. Aizat & Sarah's household"></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ob_tree" placeholder="e.g. BearFamily"></div>
+    <div id="ob_msg" class="cap" style="min-height:18px;"></div>
+    <button class="btn primary" style="width:100%;" id="ob_go">Create</button>
+    <button class="link" id="ob_out2" style="margin-top:12px;">sign out</button>`);
+  document.getElementById('ob_out2').onclick=signOut;
+  document.getElementById('ob_go').onclick=async()=>{
+    const name=document.getElementById('ob_name').value.trim();
+    const label=document.getElementById('ob_label').value.trim()||'our household';
+    const tn=document.getElementById('ob_tree').value.trim()||'our family';
+    if(!name){document.getElementById('ob_msg').textContent='your name is needed';return;}
+    document.getElementById('ob_msg').textContent='creating…';
+    const {error}=await sb.rpc('create_tree',{nucleus_label:label,tree_nm:tn});
+    if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
+    await cloudFetchAll();
+    const id=crypto.randomUUID();
+    const {error:e2}=await sb.from('person').insert({id,tree_id:ME.treeId,full_name:name,
+      gender:document.getElementById('ob_gender').value||null,claimed_by:ME.nucleusId});
+    if(e2){document.getElementById('ob_msg').textContent=(e2.message||'failed').toLowerCase();return;}
+    try{localStorage.removeItem('bft.pendingNewTree');}catch(e){} PENDING_NEWTREE=null;
+    await cloudFetchAll(); startSession(ME.nucleusId,id); }; }
 function renderJoinInvited(code){
   loginCard(`<h1>Welcome 🐻</h1>
     <div class="cap">you've been invited — name your household and you'll land in your place</div>
@@ -1455,7 +1511,8 @@ function enterApp(){
   document.getElementById('treename').textContent=S.nuclei[S.session.nucleusId].treeName;
   document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
   rebuild(); view.s=1; centerOn(viewing()); updateFocusBar();
-  if(MODE==='cloud')subscribeRealtime(); }
+  if(MODE==='cloud')subscribeRealtime();
+  try{ if(!localStorage.getItem(tutKey()))setTimeout(()=>openTutorial(true),600); }catch(e){} }
 async function boot(){ S=blankState();
   renderLogin(); // always paint immediately — never gate first paint on the network
   if(sb){ try{ const {data}=await Promise.race([ sb.auth.getSession(),
