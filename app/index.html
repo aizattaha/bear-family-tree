@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Bear Family Tree</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
@@ -18,7 +18,9 @@
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
 html,body{height:100%;}
 body{font-family:Poppins,Futura,"Century Gothic",-apple-system,sans-serif;background:var(--field);
-  color:var(--ink);font-size:15px;line-height:24px;overflow:hidden;}
+  color:var(--ink);font-size:15px;line-height:24px;overflow:hidden;
+  touch-action:none;-webkit-text-size-adjust:100%;} /* the page never zooms — only the tree does */
+#sheet,#login{touch-action:pan-y;}
 button{font:inherit;border:0;background:none;cursor:pointer;color:inherit;}
 input,select,textarea{font:inherit;color:var(--ink);}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important;}}
@@ -200,6 +202,9 @@ input,select,textarea{font:inherit;color:var(--ink);}
 <script>
 'use strict';
 /* Bear Family Tree — cloud build */
+// iOS Safari: block browser page-pinch entirely; the tree has its own zoom
+document.addEventListener('gesturestart',e=>e.preventDefault());
+document.addEventListener('gesturechange',e=>e.preventDefault());
 /* ================= cloud config ================= */
 const SUPABASE_URL='https://garbnserzkuazmvonfem.supabase.co';
 const SUPABASE_KEY='sb_publishable_I-mPsmgwDuPqc20Y09iZ7g_lL1Z_sBp';
@@ -679,7 +684,10 @@ function computeLayout(vis){
       // by the couple's middle; the partner's side mirrors on the right) and
       // blocks can never leapfrog into each other
       ready.sort((a,b)=>anchorX(a)-anchorX(b));
-      for(const r of ready)placeClear(r,anchorX(r)+100-width(r)/2+(width(r)/2-unitW(r)/2),1); }
+      // centre each married-in family directly over their own child —
+      // never drifting over the child's partner (placeClear slides it
+      // aside only if the spot is taken)
+      for(const r of ready)placeClear(r,anchorX(r)-width(r)/2,1); }
     else { const r=roots.find(x=>!x.placed);
       const maxX=Math.max(0,...units.filter(u=>u.placed).map(u=>u.x+unitW(u)/2));
       placeClear(r,maxX+120,1); } }
@@ -903,7 +911,11 @@ mm.addEventListener('click',e=>{ const {bounds}=layout; const r=mm.getBoundingCl
 /* ================= sheet infra ================= */
 const scrim=document.getElementById('scrim'), sheet=document.getElementById('sheet'),
       sheetbody=document.getElementById('sheetbody');
-function openSheet(html){ sheetbody.innerHTML=html; scrim.style.display='block';
+function openSheet(html){ sheetbody.innerHTML=html;
+  // person-data fields must never trigger contact/credit-card autofill
+  sheetbody.querySelectorAll('input:not([autocomplete]),textarea:not([autocomplete])')
+    .forEach(i=>i.setAttribute('autocomplete','off'));
+  scrim.style.display='block';
   requestAnimationFrame(()=>sheet.classList.add('open')); }
 function closeSheet(){ sheet.classList.remove('open'); scrim.style.display='none'; }
 scrim.onclick=closeSheet;
@@ -1316,38 +1328,36 @@ function addExpansionSilent(kind,pid){ computeVisible(); const key=kind+':'+pid;
 /* ================= login / auth / onboarding ================= */
 function loginCard(inner){ const el=document.getElementById('login');
   el.style.display='flex'; document.getElementById('app').style.display='none';
-  el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`; return el; }
+  el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`;
+  el.querySelectorAll('input:not([autocomplete])').forEach(i=>i.setAttribute('autocomplete','off'));
+  return el; }
 function renderLogin(signup){
   if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
   loginCard(`<h1>Bear Family Tree</h1>
     ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`
      :PENDING_NEWTREE?`<div style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to create your own family tree! 🐻</div>`:''}
     <div class="cap">${signup?'create your account — it takes ten seconds':'sign in — one login per household, shared or personal'}</div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" type="email" autocomplete="email"></div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
-    <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
-    ${signup
-      ?`<button class="btn primary" style="width:100%;" id="au_up">Create account</button>
-         <button class="link" id="au_sw" style="margin-top:12px;">already have an account? sign in</button>`
-      :`<button class="btn primary" style="width:100%;" id="au_in">Sign in</button>
-         <button class="btn secondary" style="width:100%;margin-top:8px;" id="au_up">Create account</button>`}
+    <form id="au_form" method="post" action="#" autocomplete="on">
+      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" name="email" type="email" autocomplete="username" inputmode="email"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" name="password" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
+      <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
+      ${signup
+        ?`<button type="submit" class="btn primary" style="width:100%;" id="au_up">Create account</button>`
+        :`<button type="submit" class="btn primary" style="width:100%;" id="au_in">Sign in</button>
+           <button type="button" class="btn secondary" style="width:100%;margin-top:8px;" id="au_up">Create account</button>`}
+    </form>
+    ${signup?'<button class="link" id="au_sw" style="margin-top:12px;">already have an account? sign in</button>':''}
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
   const msg=t=>{document.getElementById('au_msg').textContent=t;};
   const creds=()=>({email:document.getElementById('au_email').value.trim(),
                     password:document.getElementById('au_pass').value});
-  if(PENDING_INVITE&&sb){ // personalise: "Kak Yana, you're invited to join Bear Family Tree!"
-    sb.rpc('invite_preview',{invite_code:PENDING_INVITE}).then(({data})=>{
-      const b=document.getElementById('inv_banner');
-      if(b&&data)b.textContent=data+", you're invited to join Bear Family Tree! 🐻"; }).catch(()=>{}); }
-  const sw=document.getElementById('au_sw'); if(sw)sw.onclick=()=>renderLogin(false);
-  const inBtn=document.getElementById('au_in');
-  if(inBtn)inBtn.onclick=async()=>{ if(!sb)return;
+  const doIn=async()=>{ if(!sb)return;
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     msg('signing in…');
     const {error}=await sb.auth.signInWithPassword(c);
     if(error)msg((error.message||'sign-in failed').toLowerCase()); else enterCloud(); };
-  document.getElementById('au_up').onclick=async()=>{ if(!sb)return;
+  const doUp=async()=>{ if(!sb)return;
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     if(c.password.length<6){msg('password needs at least 6 characters');return;}
     msg('creating account…');
@@ -1355,6 +1365,14 @@ function renderLogin(signup){
     if(error)msg((error.message||'sign-up failed').toLowerCase());
     else if(!data.session)msg('account created — check your email to confirm, then sign in');
     else enterCloud(); };
+  // a real <form> submit is what makes password managers save & offer credentials
+  document.getElementById('au_form').onsubmit=e=>{ e.preventDefault(); (signup?doUp:doIn)(); };
+  if(!signup)document.getElementById('au_up').onclick=doUp; // type=button in sign-in view
+  if(PENDING_INVITE&&sb){ // personalise: "Kak Yana, you're invited to join Bear Family Tree!"
+    sb.rpc('invite_preview',{invite_code:PENDING_INVITE}).then(({data})=>{
+      const b=document.getElementById('inv_banner');
+      if(b&&data)b.textContent=data+", you're invited to join Bear Family Tree! 🐻"; }).catch(()=>{}); }
+  const sw=document.getElementById('au_sw'); if(sw)sw.onclick=()=>renderLogin(false);
   document.getElementById('au_demo').onclick=()=>{ MODE='demo'; load();
     if(S.session)enterApp(); else renderDemoLogin(); }; }
 function renderDemoLogin(){ const el=document.getElementById('login');
