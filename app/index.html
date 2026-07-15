@@ -219,7 +219,7 @@ try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/);
   PENDING_NEWTREE=localStorage.getItem('bft.pendingNewTree'); }catch(e){}
 const isSuper=()=>MODE==='cloud'&&!!(S&&S.nuclei[ME.nucleusId]||{}).isSuper;
 /* ================= data ================= */
-const LS_KEY='bearFamilyTree.v7';
+const LS_KEY='bearFamilyTree.v8';
 const COUNTRIES=[['MY','Malaysia'],['SG','Singapore'],['AU','Australia'],['GB','United Kingdom'],
  ['US','United States'],['ID','Indonesia'],['BN','Brunei'],['NZ','New Zealand'],['CA','Canada'],
  ['AE','UAE'],['SA','Saudi Arabia'],['JP','Japan'],['KR','South Korea'],['CN','China'],['HK','Hong Kong'],
@@ -258,7 +258,9 @@ function seed(){
     P('ros','Roslinda Hashim','f',1962,'MY',null), P('hafiz','Hafiz Kamal','m',1992,'SG',null),
     P('aminah','Aminah Bee','f',1966,'SG',null),
     P('iman','Iman Harun','m',1998,'SG',null),  // Aminah's son from her first marriage
-    P('mia','Mia Aina','f',2019,'MY',null)      // Kak Ina's daughter — auto-visible niece
+    P('mia','Mia Aina','f',2019,'MY',null),     // Kak Ina's daughter — auto-visible niece
+    P('lina','Lina Osman','f',1987,'MY',null),  // Farid's wife — cousins' partners show too
+    P('zara','Zara Yusuf','f',1990,'GB',null)   // Mak Ngah's daughter
   ].forEach(p=>persons[p.id]=p);
   const rel=(k,a,b)=>({kind:k,a,b});
   const rels=[
@@ -281,7 +283,9 @@ function seed(){
     rel('pc','kamal','hafiz'),rel('pc','ros','hafiz'),
     rel('pt','kamal','aminah'),
     rel('pc','aminah','iman'),    // step-child: linked to Aminah only, not Kamal
-    rel('pc','ina','mia')];
+    rel('pc','ina','mia'),
+    rel('pt','farid','lina'),
+    rel('pc','makngah','zara')];
   const nicknames={
     aizat:{atok:'Atok',granny:'Granny',baba:'Baba',mama:'Mama',ina:'Kak Ina',sarah:'Sayang',
       paklong:'Pak Long',makngah:'Mak Ngah',tokwan:'Tok Wan',tokyang:'Tok Yang',
@@ -479,7 +483,8 @@ function computeVisible(){ revealedBy=new Map();
       const adds=e.kind==='side'
         ?[...parentsOf(e.pid),
           ...siblingsOf(e.pid).flatMap(s=>[s,...partnersOf(s).filter(x=>relStatus(s,x)==='together')])]
-        :[...partnersOf(e.pid),...childrenOf(e.pid)];
+        :[...partnersOf(e.pid),
+          ...childrenOf(e.pid).flatMap(c=>[c,...partnersOf(c).filter(x=>relStatus(c,x)==='together')])];
       for(const a of adds) if(!vis.has(a)){vis.add(a);revealedBy.set(a,expKey(e));changed=true;} } }
   return vis; }
 function hiddenDeepCount(seeds,vis){ const seen=new Set(vis); let cnt=0,front=[];
@@ -524,14 +529,14 @@ function addExpansion(kind,pid){ computeVisible();
   const key=kind+':'+pid;
   let e=S.history.find(x=>expKey(x)===key);
   if(!e){ e={kind,pid,from:revealedBy.get(pid)||'nucleus'}; S.history.push(e); }
-  // the one-side-at-a-time rule: keep only your nucleus + the chain that
-  // leads to this expansion — every other branch (the partner's side at
-  // every couple along the way) folds back to its ⊕ chip
-  const keep=new Set([...defaultExpansions().map(expKey)].filter(k=>k.startsWith('family:')));
-  chainKeys(pid).forEach(k=>keep.add(k));
-  keep.add(key);
-  S.active=S.active.filter(k=>keep.has(k));
-  [...keep].forEach(k=>{if(!S.active.includes(k))S.active.push(k);});
+  // one side per COUPLE is the only auto-collapse: opening someone's side
+  // parks their partner's side (two sibling-fans can't share one couple).
+  // Downward (family) expansions never collapse anything — the whole tree
+  // can be explored open, aunts' and uncles' families side by side.
+  if(kind==='side'){
+    const partnerSides=partnersOf(pid).map(x=>'side:'+x);
+    S.active=S.active.filter(k=>!partnerSides.includes(k)); }
+  if(!S.active.includes(key))S.active.push(key);
   save(); rebuild(pid); anchorRestore(viewing(),anchor); flipExisting(oldPos,oldView);
   updateFocusBar(kind==='side'?displayName(pid)+"'s side":displayName(pid)+"'s family"); }
 function removeExpansion(kind,pid){ const key=kind+':'+pid;
@@ -776,7 +781,9 @@ function rebuild(origin){
     const sideHidden=[...parentsOf(pid),
       ...siblingsOf(pid).flatMap(s=>[s,...partnersOf(s).filter(x=>relStatus(s,x)==='together')])]
       .filter(x=>!vis.has(x));
-    const famHidden=[...partnersOf(pid),...childrenOf(pid)].filter(x=>!vis.has(x));
+    const famHidden=[...partnersOf(pid),
+      ...childrenOf(pid).flatMap(c=>[c,...partnersOf(c).filter(x=>relStatus(c,x)==='together')])]
+      .filter(x=>!vis.has(x));
     if(S.active.includes(sideKey)&&[...parentsOf(pid),...siblingsOf(pid)].some(x=>vis.has(x)&&revealedBy.get(x)===sideKey))
       chips.push({t:'⊖ collapse',cls:'',act:()=>removeExpansion('side',pid)});
     else if(sideHidden.length){ const n=hiddenDeepCount(sideHidden,vis);
@@ -1298,16 +1305,12 @@ function revealPath(target){ let vis=computeVisible(); if(vis.has(target))return
     vis=computeVisible(); if(vis.has(B))continue;
     if(parentsOf(A).includes(B)||siblingsOf(A).includes(B))addExpansionSilent('side',A);
     else addExpansionSilent('family',A); }
-  // enforce the one-side-at-a-time rule on the final chain
-  computeVisible();
-  const keep=new Set(defaultExpansions().map(expKey).filter(k=>k.startsWith('family:')));
-  chainKeys(target).forEach(k=>keep.add(k));
-  S.active=S.active.filter(k=>keep.has(k));
-  [...keep].forEach(k=>{if(!S.active.includes(k)&&S.history.find(e=>expKey(e)===k))S.active.push(k);});
   save(); rebuild(); updateFocusBar(displayName(target)); }
 function addExpansionSilent(kind,pid){ computeVisible(); const key=kind+':'+pid;
   let e=S.history.find(x=>expKey(x)===key);
   if(!e){e={kind,pid,from:revealedBy.get(pid)||'nucleus'};S.history.push(e);}
+  if(kind==='side'){ const partnerSides=partnersOf(pid).map(x=>'side:'+x);
+    S.active=S.active.filter(k=>!partnerSides.includes(k)); }
   if(!S.active.includes(key))S.active.push(key); }
 
 /* ================= login / auth / onboarding ================= */
