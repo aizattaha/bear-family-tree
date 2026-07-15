@@ -224,7 +224,7 @@ try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/);
   PENDING_NEWTREE=localStorage.getItem('bft.pendingNewTree'); }catch(e){}
 const isSuper=()=>MODE==='cloud'&&!!(S&&S.nuclei[ME.nucleusId]||{}).isSuper;
 /* ================= data ================= */
-const LS_KEY='bearFamilyTree.v8';
+const LS_KEY='bearFamilyTree.v9';
 const COUNTRIES=[['MY','Malaysia'],['SG','Singapore'],['AU','Australia'],['GB','United Kingdom'],
  ['US','United States'],['ID','Indonesia'],['BN','Brunei'],['NZ','New Zealand'],['CA','Canada'],
  ['AE','UAE'],['SA','Saudi Arabia'],['JP','Japan'],['KR','South Korea'],['CN','China'],['HK','Hong Kong'],
@@ -265,7 +265,8 @@ function seed(){
     P('iman','Iman Harun','m',1998,'SG',null),  // Aminah's son from her first marriage
     P('mia','Mia Aina','f',2019,'MY',null),     // Kak Ina's daughter — auto-visible niece
     P('lina','Lina Osman','f',1987,'MY',null),  // Farid's wife — cousins' partners show too
-    P('zara','Zara Yusuf','f',1990,'GB',null)   // Mak Ngah's daughter
+    P('zara','Zara Yusuf','f',1990,'GB',null),  // Mak Ngah's daughter
+    P('emma','Emma Lee','f',1997,'SG',null)     // Danish's girlfriend — dating ∕∕ demo
   ].forEach(p=>persons[p.id]=p);
   const rel=(k,a,b)=>({kind:k,a,b});
   const rels=[
@@ -290,7 +291,8 @@ function seed(){
     rel('pc','aminah','iman'),    // step-child: linked to Aminah only, not Kamal
     rel('pc','ina','mia'),
     rel('pt','farid','lina'),
-    rel('pc','makngah','zara')];
+    rel('pc','makngah','zara'),
+    {kind:'pt',a:'danish',b:'emma',status:'dating'}];
   const nicknames={
     aizat:{atok:'Atok',granny:'Granny',baba:'Baba',mama:'Mama',ina:'Kak Ina',sarah:'Sayang',
       paklong:'Pak Long',makngah:'Mak Ngah',tokwan:'Tok Wan',tokyang:'Tok Yang',
@@ -386,6 +388,12 @@ const db={
     const {error}=await sb.from('relationship').delete().eq('kind','partner')
       .or(`and(person_a.eq.${a},person_b.eq.${b}),and(person_a.eq.${b},person_b.eq.${a})`);
     if(error)dbErr(error); },
+  async deletePerson(pid){ if(!db.on())return;
+    const {error:e1}=await sb.from('relationship').delete()
+      .or(`person_a.eq.${pid},person_b.eq.${pid}`);
+    if(e1)dbErr(e1);
+    const {error}=await sb.from('person').update({deleted_at:new Date().toISOString()})
+      .eq('id',pid); if(error)dbErr(error); },
   async claim(pid){ if(!db.on())return;
     const {error}=await sb.rpc('claim_person',{p:pid}); if(error)dbErr(error); },
   async renameNucleus(name){ if(!db.on())return;
@@ -409,13 +417,14 @@ const partnerOf=id=>partnersOf(id).find(x=>relStatus(id,x)==='together')||partne
 function partnerRelOf(a,b){ return S.rels.find(r=>r.kind==='pt'&&
   ((r.a===a&&r.b===b)||(r.a===b&&r.b===a))); }
 function relStatus(a,b){ const r=partnerRelOf(a,b); return (r&&r.status)||'together'; }
+const isCurrent=s=>s==='together'||s==='dating'; // both count as "current partner"
 function sharedChildren(a,b){ const cb=new Set(childrenOf(b));
   return childrenOf(a).filter(c=>cb.has(c)); }
 function marriedInExOnly(pid,vis){ // on canvas only through an ended partnership
   if(parentsOf(pid).some(x=>vis.has(x))||siblingsOf(pid).some(x=>vis.has(x)))return false;
   const vps=partnersOf(pid).filter(x=>vis.has(x));
   if(!vps.length)return false;
-  return vps.every(x=>relStatus(pid,x)!=='together'); }
+  return vps.every(x=>!isCurrent(relStatus(pid,x))); }
 function siblingsOf(id){ const s=new Set();
   parentsOf(id).forEach(p=>childrenOf(p).forEach(c=>{if(c!==id)s.add(c);})); return [...s]; }
 function neighborsOf(id){ return [...new Set([...parentsOf(id),...childrenOf(id),...partnersOf(id)])]; }
@@ -435,7 +444,8 @@ function canEditMemorial(pid){ return branchDistance(pid)<=5; }
 /* ================= names / display ================= */
 const viewing=()=>S.session.viewingAs;
 function nickFor(pid){ return (S.nicknames[viewing()]||{})[pid]||''; }
-function displayName(pid){ return nickFor(pid)||person(pid).name.split(' ')[0]; }
+function displayName(pid){ const per=person(pid);
+  return nickFor(pid)||(per?per.name.split(' ')[0]:'?'); }
 function flagEmoji(cc){ if(!cc)return ''; return cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt(0))); }
 function fmtDate(d){ if(!d)return ''; if(/^\d{4}$/.test(d))return d;
   const dt=new Date(d+'T00:00:00'); if(isNaN(dt))return d;
@@ -487,9 +497,9 @@ function computeVisible(){ revealedBy=new Map();
       if(!vis.has(e.pid))continue;
       const adds=e.kind==='side'
         ?[...parentsOf(e.pid),
-          ...siblingsOf(e.pid).flatMap(s=>[s,...partnersOf(s).filter(x=>relStatus(s,x)==='together')])]
+          ...siblingsOf(e.pid).flatMap(s=>[s,...partnersOf(s).filter(x=>isCurrent(relStatus(s,x)))])]
         :[...partnersOf(e.pid),
-          ...childrenOf(e.pid).flatMap(c=>[c,...partnersOf(c).filter(x=>relStatus(c,x)==='together')])];
+          ...childrenOf(e.pid).flatMap(c=>[c,...partnersOf(c).filter(x=>isCurrent(relStatus(c,x)))])];
       for(const a of adds) if(!vis.has(a)){vis.add(a);revealedBy.set(a,expKey(e));changed=true;} } }
   return vis; }
 function hiddenDeepCount(seeds,vis){ const seen=new Set(vis); let cnt=0,front=[];
@@ -599,7 +609,7 @@ function computeLayout(vis){
   const pick=pid=>{ // a person's first choice: earliest still-current marriage,
     // else an ended one while shared children are on screen
     const cands=partnersOf(pid).filter(x=>vis.has(x)&&gens.get(x)===gens.get(pid)&&!unitOf[x]);
-    return cands.find(x=>relStatus(pid,x)==='together')
+    return cands.find(x=>isCurrent(relStatus(pid,x)))
          ||cands.find(x=>sharedChildren(pid,x).some(c=>vis.has(c)))||null; };
   const mkUnit=members=>{ const u={members,g:gens.get(members[0]),children:[],parent:null,
       via:null,secAnchor:null,attach:[],attachedTo:null,placed:false,x:0,_w:0,_cw:0};
@@ -737,6 +747,9 @@ function rebuild(origin){
       if(st==='together'){
         svg+=`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5"/>`;
         svg+=`<circle cx="${mx}" cy="${y}" r="3.5" fill="#B4CEFF"/>`; }
+      else if(st==='dating'){ // girlfriend/boyfriend: two slashes, no line
+        svg+=`<line x1="${mx-11}" y1="${y+7}" x2="${mx-3}" y2="${y-7}" stroke="#B4CEFF" stroke-width="2.5" stroke-linecap="round"/>`;
+        svg+=`<line x1="${mx+3}" y1="${y+7}" x2="${mx+11}" y2="${y-7}" stroke="#B4CEFF" stroke-width="2.5" stroke-linecap="round"/>`; }
       else { // broken line + genealogical ⫽ divorce mark + chip badge
         svg+=`<line x1="${x1}" y1="${y}" x2="${mx-16}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5" stroke-dasharray="5 5"/>`;
         svg+=`<line x1="${mx+16}" y1="${y}" x2="${x2}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5" stroke-dasharray="5 5"/>`;
@@ -787,10 +800,10 @@ function rebuild(origin){
     const chips=[];
     const sideKey='side:'+pid, famKey='family:'+pid;
     const sideHidden=[...parentsOf(pid),
-      ...siblingsOf(pid).flatMap(s=>[s,...partnersOf(s).filter(x=>relStatus(s,x)==='together')])]
+      ...siblingsOf(pid).flatMap(s=>[s,...partnersOf(s).filter(x=>isCurrent(relStatus(s,x)))])]
       .filter(x=>!vis.has(x));
     const famHidden=[...partnersOf(pid),
-      ...childrenOf(pid).flatMap(c=>[c,...partnersOf(c).filter(x=>relStatus(c,x)==='together')])]
+      ...childrenOf(pid).flatMap(c=>[c,...partnersOf(c).filter(x=>isCurrent(relStatus(c,x)))])]
       .filter(x=>!vis.has(x));
     if(S.active.includes(sideKey)&&[...parentsOf(pid),...siblingsOf(pid)].some(x=>vis.has(x)&&revealedBy.get(x)===sideKey))
       chips.push({t:'⊖ collapse',cls:'',act:()=>removeExpansion('side',pid)});
@@ -965,9 +978,10 @@ function partnersCardHtml(pid){
     const ctrl=canRel
       ?`<select onchange="setPStatus('${pid}','${other}',this.value)" style="background:#fff;border:0;border-radius:8px;padding:3px 6px;font-size:12px;color:var(--ink);">
           <option value="together" ${st==='together'?'selected':''}>together</option>
+          <option value="dating" ${st==='dating'?'selected':''}>dating</option>
           <option value="separated" ${st==='separated'?'selected':''}>separated</option>
           <option value="divorced" ${st==='divorced'?'selected':''}>divorced</option></select>
-        ${st!=='together'?`<input value="${esc(r.ended||'')}" placeholder="year" onchange="setPEnded('${pid}','${other}',this.value)"
+        ${(st==='separated'||st==='divorced')?`<input value="${esc(r.ended||'')}" placeholder="year" onchange="setPEnded('${pid}','${other}',this.value)"
           style="width:54px;background:#fff;border:0;border-radius:8px;padding:3px 6px;font-size:12px;">`:''}
         <button class="link" onclick="unlinkPartner('${pid}','${other}')">unlink</button>`
       :esc(st+(r.ended?' · '+r.ended:''));
@@ -976,9 +990,30 @@ function partnersCardHtml(pid){
       <span class="who" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${ctrl}</span></div>`;
   }).join('');
   return `<div class="card"><div class="label">Partners</div>${rows}
-    <div class="cap2" style="margin-top:6px;">separated & divorced stay on the tree with a broken line while shared children are shown — "unlink" removes the link entirely (both people stay; children keep both parents)</div></div>`; }
+    <div class="cap2" style="margin-top:6px;">dating shows as two slashes ∕∕ · separated & divorced stay with a broken line while shared children are shown — "unlink" removes the link entirely (both people stay; children keep both parents)</div></div>`; }
+function childrenCardHtml(pid){
+  const kids=childrenOf(pid).filter(c=>person(c));
+  // the fix-the-past case: partner's children not yet linked to this person
+  const unlinked=[...new Set(partnersOf(pid).flatMap(pt=>childrenOf(pt)))]
+    .filter(c=>person(c)&&!kids.includes(c));
+  if(!kids.length&&!unlinked.length)return '';
+  const canRel=canEditPerson(pid);
+  const rows=[
+    ...kids.map(c=>`<div class="nickrow"><span class="nickname">${esc(person(c).name)}</span>
+      <span class="who">${esc(displayName(c))}</span></div>`),
+    ...unlinked.map(c=>`<div class="nickrow"><span class="nickname">${esc(person(c).name)}</span>
+      <span class="who">${canRel
+        ?`not linked · <button class="link" onclick="linkChild('${pid}','${c}')">link as ${esc(displayName(pid))}'s child</button>`
+        :'not linked to '+esc(displayName(pid))}</span></div>`)
+  ].join('');
+  return `<div class="card"><div class="label">Children</div>${rows}
+    ${unlinked.length?`<div class="cap2" style="margin-top:6px;">"not linked" = their partner's child only (a step-child) — tap link if they're actually ${esc(displayName(pid))}'s child too</div>`:''}</div>`; }
+window.linkChild=(parent,child)=>{
+  const r={kind:'pc',a:parent,b:child};
+  S.rels.push(r); db.insertRel(r);
+  save(); rebuild(); openPerson(parent); toast('linked — '+person(child).name); };
 window.setPStatus=(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
-  r.status=v; if(v==='together')delete r.ended;
+  r.status=v; if(isCurrent(v))delete r.ended;
   db.updateRel(r);
   save(); rebuild(); openPerson(a); toast(v==='together'?'marked together':'marked '+v); };
 window.setPEnded=(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
@@ -1016,6 +1051,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
         <button class="link" onclick="saveNick('${pid}')">save</button></div></div>
     <div class="card"><div class="label">Also known as</div>${akaRows}</div>
     ${partnersCardHtml(pid)}
+    ${childrenCardHtml(pid)}
     <div class="card"><div class="label">Photos — young kid · teen · adult</div>
       <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div>
       <div class="cap2" style="margin-top:8px;">the starred photo is the face shown on the tree</div></div>
@@ -1058,7 +1094,8 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     <div class="btnrow">
       <button class="btn secondary" onclick="openAdd('${pid}')">Add relative</button>
       ${(editable||memEditable)?`<button class="btn primary" onclick="savePerson('${pid}')">Save</button>`:''}
-    </div>`);
+    </div>
+    ${editable?`<button class="link" style="display:block;margin:14px auto 0;color:var(--bad,#D25353);" onclick="deletePersonUI('${pid}')">remove ${esc(displayName(pid))} from the tree</button>`:''}`);
   document.getElementById('moreBtn').onclick=()=>{ const m=document.getElementById('moreFields');
     const show=m.style.display==='none'; m.style.display=show?'block':'none';
     document.getElementById('moreBtn').textContent=show?'− more':'+ more'; };
@@ -1094,6 +1131,14 @@ window.saveNick=(pid)=>{ const v=document.getElementById('mynick').value.trim();
   if(v)S.nicknames[viewing()][pid]=v; else delete S.nicknames[viewing()][pid];
   db.upsertNick(viewing(),pid,v);
   save(); rebuild(); toast(v?`saved — you call them ${v}`:'nickname removed'); };
+window.deletePersonUI=(pid)=>{ const per=person(pid); if(!per||pid===viewing())return;
+  if(!confirm(`Remove ${per.name} from the tree?\n\nTheir links to everyone disappear too — photos and details go with them. Children they have keep their other parent.`))return;
+  delete S.persons[pid];
+  S.rels=S.rels.filter(r=>r.a!==pid&&r.b!==pid);
+  for(const v in S.nicknames)delete S.nicknames[v][pid];
+  delete S.nicknames[pid];
+  db.deletePerson(pid);
+  save(); closeSheet(); rebuild(); toast('removed — '+per.name); };
 window.claimPerson=(pid)=>{ person(pid).claimedBy=S.session.nucleusId;
   db.claim(pid); save(); openPerson(pid);
   toast('claimed into your nucleus'); };
@@ -1189,6 +1234,7 @@ function openSelf(){ const per=person(viewing());
       <div class="cap2" style="margin-top:4px;">the name shown big on your own node</div></div>
     <div class="card"><div class="label">What people call you</div>${rows}</div>
     ${partnersCardHtml(viewing())}
+    ${childrenCardHtml(viewing())}
     <div class="card"><div class="label">Your nucleus</div>
       <div class="nickrow"><span class="nickname">${esc(members)}</span><span class="who">shared login · always in view</span></div>
       <div class="nickrow"><span class="nickname" style="color:var(--primary);" id="tn_show">${esc(nuc.treeName)}</span>
