@@ -204,7 +204,7 @@ const SUPABASE_URL='https://garbnserzkuazmvonfem.supabase.co';
 const SUPABASE_KEY='sb_publishable_I-mPsmgwDuPqc20Y09iZ7g_lL1Z_sBp';
 let sb=null; try{ sb=window.supabase?.createClient(SUPABASE_URL,SUPABASE_KEY,
   {auth:{lock:(_n,_t,fn)=>fn()}}); }catch(e){} // no-op lock: navigator.locks hangs on file:// pages
-const APP_URL='';                      // set to the hosted URL (e.g. https://bearfamily.netlify.app) once deployed
+const APP_URL='https://bearfamilytree.netlify.app'; // the family's home — invite links point here
 let MODE='demo';                       // 'cloud' after sign-in
 const ME={userId:null,nucleusId:null,treeId:null};
 let PENDING_INVITE=null;               // #invite=CODE in the link → survives the sign-up dance
