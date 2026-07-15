@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bear Family Tree — Wireframe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --primary:#004A98; --accent:#B4CEFF; --accent-soft:#E4EEFF;
+    --canvas:#FFFFFF; --muted:#E6E5E5; --field:#F7F9FC;
+    --ink:#1A2B44; --ink-soft:#6B7A90;
+    --shadow-soft:0 2px 12px rgba(0,74,152,.06);
+    --shadow-lift:0 8px 28px rgba(0,74,152,.12);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:Poppins,Futura,"Century Gothic",-apple-system,sans-serif;
+    background:var(--field); color:var(--ink);
+    font-size:15px; line-height:24px; padding:48px 24px 96px;
+  }
+  .page{max-width:1040px; margin:0 auto;}
+
+  /* ---------- intro ---------- */
+  .brand{display:flex; align-items:center; gap:12px; margin-bottom:8px;}
+  .brand .tile{width:44px;height:44px;border-radius:12px;background:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;font-size:22px;}
+  h1{font-size:24px;line-height:32px;font-weight:600;}
+  .sub{color:var(--ink-soft);font-size:13px;line-height:20px;margin-bottom:40px;}
+
+  /* ---------- frames ---------- */
+  .frame{background:var(--canvas); border-radius:24px; box-shadow:var(--shadow-soft);
+    padding:24px; margin-bottom:48px;}
+  .frame h2{font-size:18px;line-height:26px;font-weight:600;}
+  .frame .cap{font-size:12px;line-height:16px;color:var(--ink-soft);margin:2px 0 20px;}
+  .screen{background:var(--field); border-radius:16px; overflow:hidden;}
+  .scroller{overflow-x:auto;}
+
+  /* ---------- app bar ---------- */
+  .appbar{background:#fff; display:flex; align-items:center; gap:14px;
+    padding:12px 20px; border-bottom:1px solid var(--muted);}
+  .appbar .tile{width:40px;height:40px;border-radius:12px;background:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;}
+  .appbar .title{font-weight:600;font-size:15px;white-space:nowrap;}
+  .search{flex:1;max-width:280px;min-width:120px;background:var(--field);border-radius:999px;
+    padding:9px 18px;font-size:13px;color:var(--ink-soft);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .chip{background:var(--accent-soft);color:var(--primary);border-radius:999px;
+    padding:7px 14px;font-size:13px;font-weight:500;white-space:nowrap;}
+  .zoom{display:flex;gap:6px;margin-left:auto;}
+  .zoom span{width:32px;height:32px;border-radius:10px;background:var(--accent-soft);
+    color:var(--primary);display:flex;align-items:center;justify-content:center;
+    font-size:14px;font-weight:500;}
+  .zoom .pct{width:auto;padding:0 10px;background:transparent;color:var(--ink-soft);font-size:12px;}
+
+  /* ---------- tree canvas ---------- */
+  .tree{position:relative;}
+  .tree svg{position:absolute;inset:0;}
+  .node{position:absolute;width:110px;text-align:center;}
+  .avatar{width:64px;height:64px;border-radius:50%;background:var(--accent-soft);
+    color:var(--primary);font-weight:600;font-size:18px;position:relative;
+    display:flex;align-items:center;justify-content:center;margin:0 auto 6px;
+    box-shadow:var(--shadow-soft);}
+  .flag{position:absolute;top:-4px;right:-4px;width:22px;height:22px;border-radius:50%;
+    background:#fff;box-shadow:var(--shadow-soft);font-size:11px;line-height:1;
+    display:flex;align-items:center;justify-content:center;}
+  .node.dim .avatar{background:var(--field);color:var(--ink-soft);box-shadow:none;
+    outline:1px solid var(--muted);filter:grayscale(1);opacity:.85;}
+  .node.dim .nick{color:var(--ink-soft);}
+  .passedon{font-size:10px;line-height:14px;color:var(--ink-soft);margin-top:2px;}
+  .node .nick{font-size:13px;line-height:18px;font-weight:500;}
+  .node .full{font-size:11px;line-height:15px;color:var(--ink-soft);}
+  .node.you .avatar{outline:3px solid var(--primary);outline-offset:3px;
+    box-shadow:0 0 0 10px rgba(180,206,255,.5), 0 10px 30px rgba(0,74,152,.28);}
+  .navhint{position:absolute;left:18px;bottom:12px;font-size:11px;line-height:15px;
+    color:var(--ink-soft);}
+  .focusbar{position:absolute;left:16px;top:14px;display:flex;gap:8px;z-index:4;}
+  .focusbar .on{background:var(--primary);color:#fff;border-radius:999px;
+    padding:7px 14px;font-size:12px;font-weight:500;}
+  .focusbar .off{background:#fff;color:var(--ink-soft);border-radius:999px;
+    padding:7px 14px;font-size:12px;font-weight:500;outline:1px solid var(--muted);}
+  .youchip{display:inline-block;margin-top:4px;background:var(--primary);color:#fff;
+    border-radius:999px;font-size:10px;font-weight:500;padding:2px 10px;}
+  .expand{position:absolute;background:var(--accent-soft);color:var(--primary);
+    border-radius:999px;padding:5px 12px;font-size:11px;font-weight:500;white-space:nowrap;
+    transform:translateX(-50%);}
+  .expand.ghost{background:#fff;outline:1px solid var(--muted);color:var(--ink-soft);}
+  .minimap{position:absolute;right:16px;bottom:16px;width:150px;height:96px;background:#fff;
+    border-radius:12px;box-shadow:var(--shadow-soft);padding:10px;}
+  .minimap i{position:absolute;background:var(--muted);border-radius:3px;}
+  .minimap .vp{position:absolute;border:1.5px solid var(--primary);border-radius:4px;background:none;}
+
+  /* ---------- annotation dots ---------- */
+  .dot{position:absolute;width:22px;height:22px;border-radius:50%;background:var(--ink);
+    color:#fff;font-size:11px;font-weight:500;display:flex;align-items:center;
+    justify-content:center;z-index:5;}
+  ol.notes{margin-top:20px;padding-left:0;list-style:none;display:grid;gap:8px;}
+  ol.notes li{display:flex;gap:10px;font-size:13px;line-height:20px;color:var(--ink-soft);}
+  ol.notes b{color:var(--ink);font-weight:500;}
+  ol.notes .n{flex:none;width:22px;height:22px;border-radius:50%;background:var(--ink);
+    color:#fff;font-size:11px;font-weight:500;display:flex;align-items:center;
+    justify-content:center;margin-top:1px;}
+
+  /* ---------- phone frames / sheets ---------- */
+  .phones{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;}
+  .phone{width:305px;flex:none;background:var(--field);border-radius:24px;overflow:hidden;
+    position:relative;box-shadow:var(--shadow-soft);}
+  .scrim{background:rgba(26,43,68,.35);height:88px;}
+  .sheet{background:#fff;border-radius:24px 24px 0 0;box-shadow:var(--shadow-lift);
+    padding:10px 20px 24px;}
+  .handle{width:36px;height:4px;border-radius:999px;background:var(--muted);margin:0 auto 18px;}
+  .profile{display:flex;align-items:center;gap:14px;margin-bottom:18px;}
+  .profile .avatar{width:76px;height:76px;margin:0;font-size:22px;flex:none;}
+  .profile h3{font-size:18px;line-height:26px;font-weight:600;}
+  .profile .cap2{font-size:12px;line-height:16px;color:var(--ink-soft);}
+  .card{background:var(--field);border-radius:16px;padding:14px 16px;margin-bottom:12px;}
+  .card .label{font-size:11px;font-weight:500;color:var(--ink-soft);
+    letter-spacing:.06em;text-transform:uppercase;margin-bottom:6px;}
+  .nickrow{display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+    padding:7px 0;}
+  .nickrow + .nickrow{border-top:1px solid var(--muted);}
+  .nickrow .nickname{font-size:15px;font-weight:500;}
+  .nickrow .who{font-size:12px;color:var(--ink-soft);text-align:right;}
+  .bignick{display:flex;align-items:center;justify-content:space-between;}
+  .bignick .v{font-size:24px;line-height:32px;font-weight:600;color:var(--primary);}
+  .link{color:var(--primary);font-size:13px;font-weight:500;}
+  .btnrow{display:flex;gap:10px;margin-top:16px;}
+  .btn{flex:1;height:44px;border-radius:999px;display:flex;align-items:center;
+    justify-content:center;font-size:14px;font-weight:500;}
+  .btn.primary{background:var(--primary);color:#fff;}
+  .btn.secondary{background:var(--accent-soft);color:var(--primary);}
+  .input{background:#fff;border-radius:14px;padding:11px 16px;font-size:14px;
+    color:var(--ink);margin-bottom:10px;}
+  .input.placeholder{color:var(--ink-soft);}
+  .input .flabel{display:block;font-size:11px;font-weight:500;color:var(--ink-soft);margin-bottom:2px;}
+  .choice{display:flex;align-items:center;gap:12px;background:#fff;border-radius:14px;
+    padding:10px 14px;margin-bottom:8px;font-size:14px;font-weight:500;}
+  .choice .itile{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);
+    color:var(--primary);display:flex;align-items:center;justify-content:center;
+    font-size:15px;flex:none;}
+  .choice.selected{outline:2px solid var(--accent);}
+  .choice .sub2{font-size:11px;font-weight:400;color:var(--ink-soft);display:block;line-height:14px;}
+  .phototile{width:84px;height:84px;border-radius:50%;background:#fff;margin:0 auto 4px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    color:var(--primary);font-size:20px;}
+  .phototile small{font-size:10px;font-weight:500;color:var(--ink-soft);}
+  .explain{font-size:12px;line-height:17px;color:var(--ink-soft);margin-top:4px;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brand">
+    <div class="tile">🐻</div>
+    <h1>Bear Family Tree — wireframe</h1>
+  </div>
+  <p class="sub">v1 · July 2026 · follows Aizat's Personal Design System v2 · names on the tree are always <b>the viewer's own nicknames</b> — this whole wireframe is rendered as seen by Aizat. See family-tree-concept.md for the spec.</p>
+
+  <!-- ============ FRAME 1 : default tree ============ -->
+  <section class="frame">
+    <h2>1 · Tree — direct family (default view)</h2>
+    <p class="cap">what you land on: three generations centred on you — parents on both sides, you + partner + siblings, your children</p>
+    <div class="screen">
+      <div class="appbar">
+        <div class="tile">🐻</div>
+        <div class="title">BearFamily</div>
+        <span class="chip" style="background:#fff;outline:1px solid var(--muted);color:var(--ink-soft);font-size:11px;padding:5px 12px;">✎ rename</span>
+        <div class="search">search the family…</div>
+        <div class="chip">viewing as Aizat</div>
+        <div class="zoom"><span>−</span><span class="pct">100%</span><span>+</span></div>
+      </div>
+      <div class="scroller">
+      <div class="tree" style="width:900px;height:500px;">
+        <svg width="900" height="500">
+          <!-- couple lines gen1 -->
+          <line x1="257" y1="68" x2="313" y2="68" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="285" cy="68" r="3.5" fill="#B4CEFF"/>
+          <line x1="587" y1="68" x2="643" y2="68" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="615" cy="68" r="3.5" fill="#B4CEFF"/>
+          <!-- gen1 -> gen2 : Aizat's parents -->
+          <path d="M285 72 V190 H185 V210 M285 190 H350 V210 M285 190 V210" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <line x1="285" y1="190" x2="285" y2="190" stroke="#E6E5E5"/>
+          <!-- gen1 -> gen2 : Sarah's parents -->
+          <path d="M615 72 V190 H470 V210 M615 190 V216" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <!-- couple line gen2 -->
+          <line x1="382" y1="242" x2="438" y2="242" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="410" cy="242" r="3.5" fill="#B4CEFF"/>
+          <!-- gen2 -> gen3 -->
+          <path d="M410 246 V355 H350 V378 M410 355 H470 V378" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+        </svg>
+
+        <!-- gen 1 -->
+        <div class="node" style="left:170px;top:36px;"><div class="avatar">AT<span class="flag">🇲🇾</span></div><div class="nick">Atok</div><div class="full">Ahmad Taha</div></div>
+        <div class="node" style="left:290px;top:36px;"><div class="avatar">HI<span class="flag">🇲🇾</span></div><div class="nick">Granny</div><div class="full">Halimah Ismail</div></div>
+        <div class="node" style="left:500px;top:36px;"><div class="avatar">RA<span class="flag">🇸🇬</span></div><div class="nick">Baba</div><div class="full">Rahim Abdullah</div></div>
+        <div class="node" style="left:620px;top:36px;"><div class="avatar">NS<span class="flag">🇸🇬</span></div><div class="nick">Mama</div><div class="full">Noor Salleh</div></div>
+        <div class="expand" style="left:225px;top:148px;">⊕ Atok's side · 8</div>
+        <div class="expand" style="left:345px;top:148px;">⊕ Granny's side · 11</div>
+        <div class="expand" style="left:555px;top:148px;">⊕ Baba's side · 5</div>
+        <div class="expand" style="left:675px;top:148px;">⊕ Mama's side · 7</div>
+
+        <!-- gen 2 -->
+        <div class="node" style="left:130px;top:210px;"><div class="avatar">NI<span class="flag">🇲🇾</span></div><div class="nick">Kak Ina</div><div class="full">Nur Aina Taha</div></div>
+        <div class="node you" style="left:295px;top:210px;"><div class="avatar">AZ<span class="flag">🇦🇺</span></div><div class="nick">Aizat</div><div class="full">Aizat Taha</div><span class="youchip">you</span></div>
+        <div class="node" style="left:415px;top:210px;"><div class="avatar">SR<span class="flag">🇦🇺</span></div><div class="nick">Sayang</div><div class="full">Sarah Rahim</div></div>
+        <div class="expand ghost" style="left:615px;top:216px;">⊕ 1 brother</div>
+
+        <!-- gen 3 -->
+        <div class="node" style="left:295px;top:378px;"><div class="avatar">AL<span class="flag">🇦🇺</span></div><div class="nick">Alya</div><div class="full">Alya Aizat</div></div>
+        <div class="node" style="left:415px;top:378px;"><div class="avatar">AI<span class="flag">🇦🇺</span></div><div class="nick">Aisha</div><div class="full">Aisha Aizat</div></div>
+
+        <div class="navhint">drag to pan · scroll to zoom · shift-scroll sideways</div>
+
+        <!-- annotation dots -->
+        <div class="dot" style="left:855px;top:10px;">1</div>
+        <div class="dot" style="left:290px;top:462px;">6</div>
+        <div class="dot" style="left:150px;top:30px;">2</div>
+        <div class="dot" style="left:280px;top:300px;">3</div>
+        <div class="dot" style="left:410px;top:142px;">4</div>
+        <div class="dot" style="left:680px;top:212px;">5</div>
+      </div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><span class="n">1</span><span><b>App bar</b> — "BearFamily" is <b>your nucleus's name for the tree</b>, not the tree's name: your sister's login says "my family", a cousin's says "FAM". Rename it any time. Search flies the canvas to any person; the "viewing as" chip is the profile picker for a shared nucleus login (so nicknames stay per person); −/+ zoom and "centre on me" live here too.</span></li>
+      <li><span class="n">2</span><span><b>Node = photo + your nickname + full name + flag.</b> You call him "Atok", so that's his big label for you — a cousin sees "Pak Cik Mad" on the same node. The little flag pip top-right = <b>where they live now</b> (🇲🇾 🇦🇺 🇸🇬 at a glance across a scattered family). Initials fill in when there's no photo yet.</span></li>
+      <li><span class="n">3</span><span><b>Your node &amp; nucleus</b> — 3px primary ring + powder-blue halo + "you" chip; the halo sits <b>outside</b> the photo so a real photo can't swallow it. Your whole nucleus (Sarah, Alya, Aisha) is <b>always in view</b> — no focus or expansion ever parks it; only its own ⊖ can.</span></li>
+      <li><span class="n">4</span><span><b>⊕ expand pills</b> — every edge person shows how many people are on their side (parents + siblings). Tap to grow the tree in that direction (frame 2).</span></li>
+      <li><span class="n">5</span><span><b>Collapsed relative chip</b> — siblings not yet expanded stay as a quiet ghost pill so the default view stays calm.</span></li>
+      <li><span class="n">6</span><span><b>The canvas is a map, not a page</b> — click &amp; drag anywhere to pan any direction; the scroll wheel <b>zooms at the cursor</b> (Figma/Miro style), which is how a vertical-only mouse wheel stops fighting a sideways tree. shift-scroll pans sideways, trackpads pan both axes natively, pinch zooms.</span></li>
+    </ol>
+  </section>
+
+  <!-- ============ FRAME 2 : expanded ============ -->
+  <section class="frame">
+    <h2>2 · Tree — Atok's side expanded</h2>
+    <p class="cap">after tapping "⊕ Atok's side" — his parents appear above, his siblings beside, each with their own collapsed families. expand as far as you like; the page just keeps growing</p>
+    <div class="screen">
+      <div class="scroller">
+      <div class="tree" style="width:900px;height:600px;">
+        <svg width="900" height="600">
+          <!-- great-grandparents couple -->
+          <line x1="237" y1="62" x2="293" y2="62" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="265" cy="62" r="3.5" fill="#B4CEFF"/>
+          <!-- gen0 -> gen1 rail -->
+          <path d="M265 66 V180 H105 V200 M265 180 H385 V200 M245 180 V200 M265 180 V180" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <path d="M105 180 H245" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <!-- Atok + Granny couple -->
+          <line x1="417" y1="232" x2="473" y2="232" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="445" cy="232" r="3.5" fill="#B4CEFF"/>
+          <!-- gen1 -> gen2 -->
+          <path d="M445 236 V350 H385 V372 M445 350 H505 V372" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <!-- Aizat + Sarah couple -->
+          <line x1="537" y1="404" x2="593" y2="404" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="565" cy="404" r="3.5" fill="#B4CEFF"/>
+        </svg>
+
+        <!-- gen 0 -->
+        <div class="node dim" style="left:150px;top:30px;"><div class="avatar">MT</div><div class="nick">Tok Wan</div><div class="full">Mohd Taha</div><div class="passedon">Returned to Allah on 4 Jun 2001</div></div>
+        <div class="node dim" style="left:270px;top:30px;"><div class="avatar">FA</div><div class="nick">Tok Yang</div><div class="full">Fatimah Ali</div><div class="passedon">Allahyarhamah · 18 Feb 2019</div></div>
+        <div class="expand" style="left:265px;top:172px;">⊕ their parents · unknown</div>
+
+        <!-- gen 1 -->
+        <div class="node" style="left:50px;top:200px;"><div class="avatar">ZT<span class="flag">🇲🇾</span></div><div class="nick">Pak Long</div><div class="full">Zulkifli Taha</div></div>
+        <div class="node" style="left:190px;top:200px;"><div class="avatar">RT<span class="flag">🇬🇧</span></div><div class="nick">Mak Ngah</div><div class="full">Rohana Taha</div></div>
+        <div class="node" style="left:330px;top:200px;"><div class="avatar">AT<span class="flag">🇲🇾</span></div><div class="nick">Atok</div><div class="full">Ahmad Taha</div></div>
+        <div class="node" style="left:450px;top:200px;"><div class="avatar">HI<span class="flag">🇲🇾</span></div><div class="nick">Granny</div><div class="full">Halimah Ismail</div></div>
+        <div class="expand ghost" style="left:105px;top:312px;">⊕ family · 5</div>
+        <div class="expand ghost" style="left:245px;top:312px;">⊕ family · 3</div>
+        <div class="expand" style="left:385px;top:312px;">⊖ collapse</div>
+
+        <!-- gen 2 -->
+        <div class="node" style="left:330px;top:372px;"><div class="avatar">NI<span class="flag">🇲🇾</span></div><div class="nick">Kak Ina</div><div class="full">Nur Aina Taha</div></div>
+        <div class="node you" style="left:450px;top:372px;"><div class="avatar">AZ<span class="flag">🇦🇺</span></div><div class="nick">Aizat</div><div class="full">Aizat Taha</div><span class="youchip">you</span></div>
+        <div class="node" style="left:570px;top:372px;"><div class="avatar">SR<span class="flag">🇦🇺</span></div><div class="nick">Sayang</div><div class="full">Sarah Rahim</div></div>
+
+        <div class="minimap">
+          <i style="left:20px;top:16px;width:40px;height:8px;"></i>
+          <i style="left:30px;top:32px;width:60px;height:8px;"></i>
+          <i style="left:44px;top:48px;width:70px;height:8px;"></i>
+          <i style="left:58px;top:64px;width:46px;height:8px;"></i>
+          <div class="vp" style="left:38px;top:26px;width:58px;height:44px;"></div>
+        </div>
+
+        <!-- dots -->
+        <div class="dot" style="left:180px;top:24px;">1</div>
+        <div class="dot" style="left:30px;top:194px;">2</div>
+        <div class="dot" style="left:440px;top:306px;">3</div>
+        <div class="dot" style="left:700px;top:490px;">4</div>
+      </div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><span class="n">1</span><span><b>A generation up</b> — great-grandparents slot in above. <b>Passed relatives grey out</b>: photo turns greyscale, the flag pip disappears, and the memorial line sits under the name in the family's chosen phrasing — "Returned to Allah on [date]", "Allahyarhamah", "Passed on [date]"… (see note 9, frame 5). Calm and factual, no black borders or somber styling. Alive vs passed is defined by one thing: whether a date of passing exists.</span></li>
+      <li><span class="n">2</span><span><b>Atok's siblings</b> join his row, each carrying their own collapsed "⊕ family · n" chip — so cousins are always one more tap, never forced on screen.</span></li>
+      <li><span class="n">3</span><span><b>⊖ collapse</b> on the node you expanded folds this side back down to frame 1.</span></li>
+      <li><span class="n">4</span><span><b>Minimap</b> appears once the tree outgrows the screen — drag anywhere to pan; the blue rectangle is your viewport. It will get huge, and that's fine.</span></li>
+    </ol>
+  </section>
+
+  <!-- ============ FRAME 3 : focus mode ============ -->
+  <section class="frame">
+    <h2>3 · Tree — focus shifts to Granny's side</h2>
+    <p class="cap">tapping "⊕ Granny's side" while Sarah's side was on screen — the accordion: Granny's branch expands, unrelated branches fold back to their ⊕ pills. your nucleus (you, Sarah, the girls) is always in view</p>
+    <div class="screen">
+      <div class="scroller">
+      <div class="tree" style="width:900px;height:680px;">
+        <svg width="900" height="680">
+          <!-- Granny's parents couple -->
+          <line x1="477" y1="68" x2="533" y2="68" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="505" cy="68" r="3.5" fill="#B4CEFF"/>
+          <!-- gen0 -> gen1 rail -->
+          <path d="M505 72 V185 M445 185 H685 M445 185 V205 M565 185 V205 M685 185 V205" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <!-- Atok + Granny couple -->
+          <line x1="357" y1="237" x2="413" y2="237" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="385" cy="237" r="3.5" fill="#B4CEFF"/>
+          <!-- gen1 -> gen2 -->
+          <path d="M385 241 V360 H265 V385 M385 360 V385" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <!-- Sarah's minimized side stem -->
+          <path d="M505 368 V383" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+          <!-- Aizat + Sarah couple -->
+          <line x1="417" y1="417" x2="473" y2="417" stroke="#E6E5E5" stroke-width="1.5"/>
+          <circle cx="445" cy="417" r="3.5" fill="#B4CEFF"/>
+          <!-- gen2 -> gen3 -->
+          <path d="M445 421 V530 H385 V553 M445 530 H505 V553" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>
+        </svg>
+
+        <div class="focusbar">
+          <span class="on">focused: Granny's side</span>
+          <span class="off">show all</span>
+        </div>
+
+        <!-- gen 0 : Granny's parents -->
+        <div class="node dim" style="left:390px;top:36px;"><div class="avatar">IY</div><div class="nick">Tok Bah</div><div class="full">Ismail Yusof</div><div class="passedon">Returned to Allah on 2 Aug 1998</div></div>
+        <div class="node dim" style="left:510px;top:36px;"><div class="avatar">SM</div><div class="nick">Tok Mi</div><div class="full">Saodah Musa</div><div class="passedon">Passed</div></div>
+        <div class="expand" style="left:505px;top:172px;">⊕ their parents · 2</div>
+
+        <!-- gen 1 : Granny + siblings, Atok as partner -->
+        <div class="node" style="left:270px;top:205px;"><div class="avatar">AT<span class="flag">🇲🇾</span></div><div class="nick">Atok</div><div class="full">Ahmad Taha</div></div>
+        <div class="node" style="left:390px;top:205px;"><div class="avatar">HI<span class="flag">🇲🇾</span></div><div class="nick">Granny</div><div class="full">Halimah Ismail</div></div>
+        <div class="node" style="left:510px;top:205px;"><div class="avatar">MI<span class="flag">🇲🇾</span></div><div class="nick">Mak Lang</div><div class="full">Mariam Ismail</div></div>
+        <div class="node" style="left:630px;top:205px;"><div class="avatar">KI<span class="flag">🇸🇬</span></div><div class="nick">Pak Ngah</div><div class="full">Kamal Ismail</div></div>
+        <div class="expand" style="left:445px;top:308px;">⊖ collapse</div>
+        <div class="expand ghost" style="left:565px;top:308px;">⊕ family · 6</div>
+        <div class="expand ghost" style="left:685px;top:308px;">⊕ family · 4</div>
+
+        <!-- gen 2 -->
+        <div class="node" style="left:210px;top:385px;"><div class="avatar">NI<span class="flag">🇲🇾</span></div><div class="nick">Kak Ina</div><div class="full">Nur Aina Taha</div></div>
+        <div class="node you" style="left:330px;top:385px;"><div class="avatar">AZ<span class="flag">🇦🇺</span></div><div class="nick">Aizat</div><div class="full">Aizat Taha</div><span class="youchip">you</span></div>
+        <div class="node" style="left:450px;top:385px;"><div class="avatar">SR<span class="flag">🇦🇺</span></div><div class="nick">Sayang</div><div class="full">Sarah Rahim</div></div>
+        <div class="expand ghost" style="left:505px;top:352px;">⊕ Sarah's side · 14</div>
+
+        <!-- gen 3 -->
+        <div class="node" style="left:330px;top:553px;"><div class="avatar">AL<span class="flag">🇦🇺</span></div><div class="nick">Alya</div><div class="full">Alya Aizat</div></div>
+        <div class="node" style="left:450px;top:553px;"><div class="avatar">AI<span class="flag">🇦🇺</span></div><div class="nick">Aisha</div><div class="full">Aisha Aizat</div></div>
+
+        <!-- dots -->
+        <div class="dot" style="left:318px;top:16px;">1</div>
+        <div class="dot" style="left:745px;top:200px;">2</div>
+        <div class="dot" style="left:585px;top:378px;">3</div>
+        <div class="dot" style="left:398px;top:302px;">4</div>
+      </div>
+      </div>
+    </div>
+    <ol class="notes">
+      <li><span class="n">1</span><span><b>Focus bar</b> — appears whenever a side is expanded. "show all" restores every branch at once, and a settings toggle ("keep branches open") turns the accordion off for anyone who wants the full mega-tree.</span></li>
+      <li><span class="n">2</span><span><b>Granny's branch grows</b> — her parents above, her siblings beside. Every new person carries their own ⊕, so you can keep going: Mak Lang's six kids, their kids, as far as the family has filled in. Depth is unlimited; the accordion is what keeps it readable.</span></li>
+      <li><span class="n">3</span><span><b>Sarah's side auto-minimised</b> — Baba, Mama and everyone behind them folded into one quiet pill with a count. Nothing is deleted, it's just parked; tapping it expands her side and parks Granny's.</span></li>
+      <li><span class="n">4</span><span><b>⊖ collapse</b> on Granny hand-folds her side too, returning you to frame 1. Your <b>nucleus</b> — Sarah, Alya, Aisha — is never parked by the accordion; minimising it takes a deliberate tap on its own ⊖.</span></li>
+    </ol>
+  </section>
+
+  <!-- ============ FRAMES 4–6 : sheets ============ -->
+  <section class="frame">
+    <h2>4 · Person sheet · 5 · Add a person · 6 · Your own profile</h2>
+    <p class="cap">tap any node → bottom sheet (left). "add relative" → the add sheet (middle). tap your own node → what the family calls you (right)</p>
+    <div class="phones">
+
+      <!-- person sheet -->
+      <div class="phone">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="handle"></div>
+          <div class="profile">
+            <div class="avatar">HI<span class="flag">🇲🇾</span></div>
+            <div>
+              <h3>Halimah Ismail</h3>
+              <div class="cap2">your mother · b. 1954 · lives in Malaysia 🇲🇾</div>
+              <div class="cap2" style="color:var(--primary);">✓ claimed — Atok &amp; Granny's nucleus</div>
+            </div>
+          </div>
+          <div class="card" style="position:relative;">
+            <div class="label">You call her</div>
+            <div class="bignick"><span class="v">Granny</span><span class="link">edit</span></div>
+            <div class="dot" style="right:-8px;top:-8px;left:auto;">1</div>
+          </div>
+          <div class="card" style="position:relative;">
+            <div class="label">Also known as</div>
+            <div class="nickrow"><span class="nickname">Granny</span><span class="who">you, Alya &amp; Aisha</span></div>
+            <div class="nickrow"><span class="nickname">Opah</span><span class="who">Farid, Dina + 4 cousins</span></div>
+            <div class="nickrow"><span class="nickname">Mak</span><span class="who">Kak Ina</span></div>
+            <div class="nickrow"><span class="nickname">Yang</span><span class="who">Atok</span></div>
+            <div class="dot" style="right:-8px;top:-8px;left:auto;">2</div>
+          </div>
+          <div class="btnrow" style="position:relative;">
+            <div class="btn secondary">Add relative</div>
+            <div class="btn primary">Edit details</div>
+            <div class="dot" style="right:-8px;top:-10px;left:auto;">3</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- add person sheet -->
+      <div class="phone">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="handle"></div>
+          <h3 style="font-size:18px;font-weight:600;text-align:center;">Add a person</h3>
+          <div class="phototile" style="position:relative;">＋<small>photo</small>
+            <div class="dot" style="right:-30px;top:26px;left:auto;">4</div>
+          </div>
+          <div style="height:12px;"></div>
+          <div class="input"><span class="flabel">Full name</span>Ismail bin Yusof</div>
+          <div style="display:flex;gap:10px;">
+            <div class="input placeholder" style="flex:1;"><span class="flabel">Born</span>year</div>
+            <div class="input" style="flex:2;"><span class="flabel">Living in</span>🇲🇾 Malaysia</div>
+          </div>
+          <div class="link" style="display:block;margin:2px 0 10px;position:relative;">− more
+            <span class="dot" style="right:-8px;top:-6px;left:auto;">9</span>
+          </div>
+          <div style="border-left:2px solid var(--accent-soft);padding-left:12px;margin-bottom:4px;">
+            <div class="input placeholder"><span class="flabel">Notes</span>anything worth remembering</div>
+            <div class="input placeholder"><span class="flabel">Passed on</span>leave empty if still with us</div>
+            <div class="input" style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <span><span class="flabel">Shown as</span>Returned to Allah on [date]</span>
+              <span style="color:var(--ink-soft);">▾</span>
+            </div>
+          </div>
+          <div class="card" style="background:none;padding:6px 0 0;position:relative;">
+            <div class="label">Connected as</div>
+            <div class="choice selected"><span class="itile">↑</span><span>Parent of Granny<span class="sub2">adds a generation above</span></span></div>
+            <div class="choice"><span class="itile">♥</span><span>Partner of…</span></div>
+            <div class="choice"><span class="itile">↓</span><span>Child of…</span></div>
+            <div class="choice"><span class="itile">↔</span><span>Sibling of…</span></div>
+            <div class="dot" style="right:-8px;top:-2px;left:auto;">5</div>
+          </div>
+          <div class="btnrow"><div class="btn primary">Save</div></div>
+          <p class="explain" style="position:relative;">saved as <b>unverified</b> — anyone within 5 branches can keep caring for this profile until the person (or their nucleus) claims it.
+            <span class="dot" style="right:-8px;top:-6px;left:auto;">7</span></p>
+        </div>
+      </div>
+
+      <!-- own profile -->
+      <div class="phone">
+        <div class="scrim"></div>
+        <div class="sheet">
+          <div class="handle"></div>
+          <div class="profile">
+            <div class="avatar" style="outline:2px solid var(--accent);outline-offset:3px;">AZ<span class="flag">🇦🇺</span></div>
+            <div>
+              <h3>Aizat Taha</h3>
+              <div class="cap2">that's you 🐻</div>
+            </div>
+          </div>
+          <div class="card" style="position:relative;">
+            <div class="label">What people call you</div>
+            <div class="nickrow"><span class="nickname">Ayah</span><span class="who">Alya &amp; Aisha</span></div>
+            <div class="nickrow"><span class="nickname">Sayang</span><span class="who">Sarah</span></div>
+            <div class="nickrow"><span class="nickname">Adik</span><span class="who">Kak Ina</span></div>
+            <div class="nickrow"><span class="nickname">Aizat</span><span class="who">Atok &amp; Granny</span></div>
+            <div class="nickrow"><span class="nickname">Abang Long</span><span class="who">Farid &amp; Dina</span></div>
+            <div class="dot" style="right:-8px;top:-8px;left:auto;">6</div>
+          </div>
+          <div class="card" style="position:relative;">
+            <div class="label">Your nucleus</div>
+            <div class="nickrow"><span class="nickname">Sarah, Alya &amp; Aisha</span><span class="who">shared login · always in view</span></div>
+            <div class="nickrow"><span class="nickname" style="color:var(--primary);">BearFamily</span><span class="who">your name for this tree · ✎</span></div>
+            <div class="dot" style="right:-8px;top:-8px;left:auto;">8</div>
+          </div>
+          <p class="explain">nicknames are set by each person for themselves to use — to change what <b>you</b> call someone, edit it on their profile.</p>
+          <div class="btnrow"><div class="btn secondary">Edit my details</div></div>
+        </div>
+      </div>
+
+    </div>
+    <ol class="notes">
+      <li><span class="n">1</span><span><b>Your nickname</b> — the one thing that's yours on someone else's profile. Edit inline; it instantly relabels their node on your tree.</span></li>
+      <li><span class="n">2</span><span><b>Also known as</b> — read-only list of every nickname others have set for this person, grouped with who uses it. This is the "family mirror".</span></li>
+      <li><span class="n">3</span><span><b>Edit details / Add relative</b> — anyone in the family can edit; changes sync for everyone (full names, photos, dates are shared; nicknames are per-viewer).</span></li>
+      <li><span class="n">4</span><span><b>Photo tile</b> — tap to upload/crop; until then the initials placeholder shows on the tree.</span></li>
+      <li><span class="n">5</span><span><b>Relationship picker</b> — a new person is always anchored to an existing one, so the tree can never have floating people. Launched from Granny's sheet, so she's pre-filled.</span></li>
+      <li><span class="n">6</span><span><b>Your own sheet</b> flips the feature around: you see everything the family calls <b>you</b>. You can't edit these — they belong to the people who set them.</span></li>
+      <li><span class="n">7</span><span><b>Unverified until claimed</b> — anyone can add a person who may never log in. While unclaimed, relatives within <b>5 branches</b> (each partner or parent-child link = 1 branch) can edit the profile; beyond 5 it's view-only. Once someone claims it as themselves or their nucleus, only that nucleus can edit.</span></li>
+      <li><span class="n">8</span><span><b>Your nucleus card</b> — who shares this login (one login per household, or per person — each family unit chooses), a reminder it's always in view, and your personal name for the tree.</span></li>
+      <li><span class="n">9</span><span><b>"Passed on" hides behind "+ more"</b> (shown expanded here) — grief is never a face-up form field; the sheet shows only name, born and living-in until you ask for more. It's still the whole alive/dead model: one optional date field, empty means alive. Filling it greys the node, turns the photo greyscale and removes the flag pip (frame 2). The <b>"Shown as" dropdown</b> picks the memorial phrasing, grouped by tradition — Islam ("Returned to Allah on [date]", "Allahyarham/-ah"), Christian ("Went home to the Lord…"), Chinese ("安息 · at rest"), generic ("Passed on [date]") or custom — each with a with-date and a no-date form, so an unknown date simply reads "Passed" or "Allahyarhamah" (see Tok Mi vs Tok Wan in the tree frames). <b>This phrasing stays editable by anyone within 5 branches even after the profile is claimed</b> — the departed can't steward their own memorial line, so nearby family always can.</span></li>
+    </ol>
+  </section>
+
+  <p class="sub" style="margin-bottom:0;">files: wireframe.html (this) · family-tree-concept.md (spec &amp; data model) — Bear Family Tree folder</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bear Family Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root{
+  --primary:#004A98; --primary-hover:#003A78; --accent:#B4CEFF; --accent-soft:#E4EEFF;
+  --canvas:#FFFFFF; --muted:#E6E5E5; --field:#F7F9FC; --ink:#1A2B44; --ink-soft:#6B7A90;
+  --shadow-soft:0 2px 12px rgba(0,74,152,.06);
+  --shadow-lift:0 8px 28px rgba(0,74,152,.12);
+  --shadow-hero:0 24px 64px rgba(0,74,152,.22), 0 4px 16px rgba(0,74,152,.10);
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;}
+body{font-family:Poppins,Futura,"Century Gothic",-apple-system,sans-serif;background:var(--field);
+  color:var(--ink);font-size:15px;line-height:24px;overflow:hidden;}
+button{font:inherit;border:0;background:none;cursor:pointer;color:inherit;}
+input,select,textarea{font:inherit;color:var(--ink);}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important;}}
+
+/* ---------- login ---------- */
+#login{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;padding:20px;
+  background:linear-gradient(170deg,#DCE9FC 0%,#E9F1FD 55%,#F7F9FC 100%);z-index:50;}
+#login .card{background:#fff;border-radius:32px;box-shadow:var(--shadow-hero);padding:36px 28px;
+  width:100%;max-width:400px;text-align:center;}
+#login .bear{width:76px;height:76px;border-radius:20px;background:var(--accent-soft);
+  display:flex;align-items:center;justify-content:center;font-size:38px;margin:0 auto 16px;}
+#login h1{font-size:24px;line-height:32px;font-weight:600;margin-bottom:4px;}
+#login .cap{font-size:12px;line-height:16px;color:var(--ink-soft);margin-bottom:22px;}
+.choice{display:flex;align-items:center;gap:12px;background:var(--field);border-radius:16px;
+  padding:12px 16px;margin-bottom:10px;width:100%;text-align:left;font-size:14px;font-weight:500;
+  transition:background .15s cubic-bezier(.4,0,.2,1);}
+.choice:hover{background:var(--accent-soft);}
+.choice .itile{width:38px;height:38px;border-radius:12px;background:var(--accent-soft);
+  color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;font-weight:600;}
+.choice .sub{display:block;font-size:11px;font-weight:400;color:var(--ink-soft);line-height:15px;}
+
+/* ---------- app bar ---------- */
+#app{position:fixed;inset:0;display:none;flex-direction:column;}
+#appbar{background:#fff;border-bottom:1px solid var(--muted);display:flex;align-items:center;
+  gap:10px;padding:10px 16px;flex-wrap:wrap;z-index:20;}
+#appbar .bear{width:40px;height:40px;border-radius:12px;background:var(--accent-soft);
+  display:flex;align-items:center;justify-content:center;font-size:19px;flex:none;}
+#treename{font-weight:600;font-size:16px;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis;}
+.iconbtn{width:34px;height:34px;border-radius:10px;background:var(--accent-soft);color:var(--primary);
+  display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;flex:none;}
+.chip{background:var(--accent-soft);color:var(--primary);border-radius:999px;padding:7px 14px;
+  font-size:13px;font-weight:500;white-space:nowrap;}
+#searchwrap{position:relative;flex:1;min-width:130px;max-width:280px;}
+#search{width:100%;background:var(--field);border-radius:999px;border:0;outline:0;
+  padding:9px 18px;font-size:13px;color:var(--ink);}
+#search::placeholder{color:var(--ink-soft);}
+#search:focus{box-shadow:0 0 0 2px var(--accent);}
+#results{position:absolute;top:42px;left:0;right:0;background:#fff;border-radius:16px;
+  box-shadow:var(--shadow-lift);padding:6px;display:none;z-index:40;max-height:260px;overflow:auto;}
+#results button{display:flex;width:100%;text-align:left;gap:10px;align-items:center;
+  padding:8px 10px;border-radius:12px;font-size:13px;}
+#results button:hover{background:var(--field);}
+#results .rn{font-weight:500;} #results .rf{font-size:11px;color:var(--ink-soft);}
+
+/* ---------- canvas ---------- */
+#viewport{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab;}
+#viewport.dragging{cursor:grabbing;}
+#world{position:absolute;left:0;top:0;transform-origin:0 0;}
+#edges{position:absolute;left:0;top:0;pointer-events:none;}
+.node{position:absolute;width:120px;text-align:center;cursor:pointer;
+  transition:left .55s cubic-bezier(.4,0,.2,1),top .55s cubic-bezier(.4,0,.2,1),
+    opacity .45s cubic-bezier(.4,0,.2,1);}
+.node.spawn{opacity:0;}
+#edges{transition:opacity .3s cubic-bezier(.4,0,.2,1);}
+.addfab{position:absolute;top:-6px;left:16px;width:26px;height:26px;border-radius:50%;
+  background:var(--primary);color:#fff;font-size:15px;font-weight:500;line-height:1;
+  display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);
+  opacity:0;transform:scale(.7);pointer-events:none;z-index:3;border:0;cursor:pointer;
+  transition:opacity .15s cubic-bezier(.4,0,.2,1),transform .15s cubic-bezier(.4,0,.2,1);}
+.node:hover .addfab,.node.selected .addfab{opacity:1;transform:scale(1);pointer-events:auto;}
+.avatar{width:64px;height:64px;border-radius:50%;background:var(--accent-soft);color:var(--primary);
+  font-weight:600;font-size:18px;position:relative;display:flex;align-items:center;justify-content:center;
+  margin:0 auto 6px;box-shadow:var(--shadow-soft);}
+.avatar img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.flagpip{position:absolute;top:-4px;right:-4px;width:22px;height:22px;border-radius:50%;background:#fff;
+  box-shadow:var(--shadow-soft);font-size:11px;line-height:1;display:flex;align-items:center;justify-content:center;}
+.node .nick{font-size:13px;line-height:18px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.node .full{font-size:11px;line-height:15px;color:var(--ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.node .passedon{font-size:10px;line-height:13px;color:var(--ink-soft);margin-top:2px;}
+.node.passed .avatar{filter:grayscale(1);opacity:.82;box-shadow:none;outline:1px solid var(--muted);}
+.node.passed .nick{color:var(--ink-soft);}
+.node.exdim{opacity:.7;} /* married-in ex: still around, visibly not core family */
+.node.you .avatar{outline:3px solid var(--primary);outline-offset:3px;
+  box-shadow:0 0 0 10px rgba(180,206,255,.5),0 10px 30px rgba(0,74,152,.28);}
+.youchip{display:inline-block;margin-top:3px;background:var(--primary);color:#fff;border-radius:999px;
+  font-size:10px;font-weight:500;padding:2px 10px;}
+.xchip{position:absolute;transform:translateX(-50%);background:var(--accent-soft);color:var(--primary);
+  border-radius:999px;padding:5px 12px;font-size:11px;font-weight:500;white-space:nowrap;cursor:pointer;
+  box-shadow:none;}
+.xchip.ghost{background:#fff;outline:1px solid var(--muted);color:var(--ink-soft);}
+#focusbar{position:absolute;left:14px;top:12px;display:none;gap:8px;z-index:10;}
+#focusbar .on{background:var(--primary);color:#fff;border-radius:999px;padding:7px 14px;font-size:12px;font-weight:500;}
+#focusbar .off{background:#fff;color:var(--ink-soft);border-radius:999px;padding:7px 14px;font-size:12px;
+  font-weight:500;outline:1px solid var(--muted);}
+#navhint{position:absolute;left:16px;bottom:12px;font-size:11px;color:var(--ink-soft);pointer-events:none;}
+#minimap{position:absolute;right:14px;bottom:14px;background:#fff;border-radius:12px;
+  box-shadow:var(--shadow-soft);width:150px;height:100px;display:none;cursor:pointer;overflow:hidden;}
+#minimap .dot{position:absolute;width:7px;height:7px;border-radius:2px;background:var(--muted);}
+#minimap .dot.me{background:var(--primary);}
+#minimap .vp{position:absolute;border:1.5px solid var(--primary);border-radius:4px;pointer-events:none;}
+
+/* ---------- sheet ---------- */
+#scrim{position:fixed;inset:0;background:rgba(26,43,68,.35);display:none;z-index:30;}
+#sheet{position:fixed;left:50%;bottom:0;transform:translate(-50%,105%);width:100%;max-width:520px;
+  background:#fff;border-radius:24px 24px 0 0;box-shadow:var(--shadow-lift);z-index:31;
+  max-height:93dvh;overflow-y:auto;padding:10px 20px calc(24px + env(safe-area-inset-bottom));
+  transition:transform .25s cubic-bezier(.4,0,.2,1);}
+#sheet.open{transform:translate(-50%,0);}
+.handle{width:36px;height:4px;border-radius:999px;background:var(--muted);margin:0 auto 16px;}
+.profile{display:flex;align-items:center;gap:14px;margin-bottom:16px;}
+.profile .avatar{width:76px;height:76px;margin:0;font-size:22px;flex:none;}
+.profile h3{font-size:18px;line-height:26px;font-weight:600;}
+.cap2{font-size:12px;line-height:17px;color:var(--ink-soft);}
+.card{background:var(--field);border-radius:16px;padding:14px 16px;margin-bottom:12px;}
+.card .label{font-size:11px;font-weight:500;color:var(--ink-soft);letter-spacing:.06em;
+  text-transform:uppercase;margin-bottom:6px;}
+.nickrow{display:flex;align-items:baseline;justify-content:space-between;gap:10px;padding:7px 0;}
+.nickrow + .nickrow{border-top:1px solid var(--muted);}
+.nickrow .nickname{font-size:15px;font-weight:500;}
+.nickrow .who{font-size:12px;color:var(--ink-soft);text-align:right;}
+.bignick{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+.bignick input{flex:1;background:#fff;border:0;outline:0;border-radius:12px;padding:8px 14px;
+  font-size:20px;font-weight:600;color:var(--primary);min-width:0;}
+.bignick input:focus{box-shadow:0 0 0 2px var(--accent);}
+.link{color:var(--primary);font-size:13px;font-weight:500;cursor:pointer;}
+.btnrow{display:flex;gap:10px;margin-top:14px;}
+.btn{flex:1;height:46px;border-radius:999px;display:flex;align-items:center;justify-content:center;
+  font-size:14px;font-weight:500;transition:background .15s;}
+.btn.primary{background:var(--primary);color:#fff;}
+.btn.primary:hover{background:var(--primary-hover);}
+.btn.secondary{background:var(--accent-soft);color:var(--primary);}
+.fld{background:var(--field);border-radius:14px;padding:9px 14px;margin-bottom:10px;}
+.fld .flabel{display:block;font-size:11px;font-weight:500;color:var(--ink-soft);margin-bottom:1px;}
+.fld input,.fld select,.fld textarea{width:100%;background:transparent;border:0;outline:0;font-size:14px;padding:2px 0;}
+.fld input:disabled,.fld select:disabled,.fld textarea:disabled{color:var(--ink-soft);}
+.photorow{display:flex;gap:12px;justify-content:space-between;}
+.pslot{flex:1;text-align:center;}
+.pslot .ph{width:72px;height:72px;border-radius:50%;background:#fff;margin:0 auto 5px;position:relative;
+  display:flex;align-items:center;justify-content:center;color:var(--primary);font-size:20px;cursor:pointer;
+  box-shadow:var(--shadow-soft);}
+.pslot .ph img{width:100%;height:100%;object-fit:cover;border-radius:50%;}
+.pslot .ph.main{outline:2px solid var(--primary);outline-offset:2px;}
+.pslot .pl{font-size:10px;line-height:13px;font-weight:500;color:var(--ink-soft);}
+.pslot .star{font-size:11px;color:var(--ink-soft);cursor:pointer;margin-top:2px;display:inline-block;}
+.pslot .star.on{color:var(--primary);font-weight:600;}
+.grouphdr{font-size:11px;font-weight:500;color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 6px;}
+.viewonly{background:var(--accent-soft);border-radius:12px;padding:8px 14px;font-size:12px;
+  color:var(--primary);margin-bottom:12px;}
+#toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,80px);background:var(--ink);color:#fff;
+  border-radius:999px;padding:9px 20px;font-size:13px;font-weight:500;z-index:60;opacity:0;
+  transition:all .25s cubic-bezier(.4,0,.2,1);pointer-events:none;max-width:88vw;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;}
+#toast.show{transform:translate(-50%,0);opacity:1;}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+</style>
+</head>
+<body>
+
+<div id="login"></div>
+
+<div id="app">
+  <div id="appbar">
+    <div class="bear">🐻</div>
+    <div id="treename" title="tap ✎ to rename">BearFamily</div>
+    <button class="iconbtn" id="renameBtn" title="rename your tree">✎</button>
+    <div id="searchwrap">
+      <input id="search" placeholder="search the family…" autocomplete="off">
+      <div id="results"></div>
+    </div>
+    <button class="chip" id="viewingBtn">viewing as …</button>
+    <button class="iconbtn" id="zoomOut">−</button>
+    <button class="iconbtn" id="zoomIn">+</button>
+    <button class="chip" id="homeBtn">◎ me</button>
+  </div>
+  <div id="viewport">
+    <div id="world"><svg id="edges"></svg><div id="nodes"></div></div>
+    <div id="focusbar"><span class="on" id="focuslabel"></span><button class="off" id="showall">back to my view</button></div>
+    <div id="navhint">click a person for ＋ add · double-click to open · drag to pan · scroll to zoom</div>
+    <div id="minimap"></div>
+  </div>
+</div>
+
+<div id="scrim"></div>
+<div id="sheet"><div class="handle"></div><div id="sheetbody"></div></div>
+<div id="toast"></div>
+<input type="file" id="fileinput" accept="image/*" style="display:none">
+
+<script>
+'use strict';
+/* Bear Family Tree — cloud build */
+/* ================= cloud config ================= */
+const SUPABASE_URL='https://garbnserzkuazmvonfem.supabase.co';
+const SUPABASE_KEY='sb_publishable_I-mPsmgwDuPqc20Y09iZ7g_lL1Z_sBp';
+let sb=null; try{ sb=window.supabase?.createClient(SUPABASE_URL,SUPABASE_KEY,
+  {auth:{lock:(_n,_t,fn)=>fn()}}); }catch(e){} // no-op lock: navigator.locks hangs on file:// pages
+const APP_URL='';                      // set to the hosted URL (e.g. https://bearfamily.netlify.app) once deployed
+let MODE='demo';                       // 'cloud' after sign-in
+const ME={userId:null,nucleusId:null,treeId:null};
+let PENDING_INVITE=null;               // #invite=CODE in the link → survives the sign-up dance
+try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/);
+  if(m){ localStorage.setItem('bft.pendingInvite',m[1]);
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){} }
+  PENDING_INVITE=localStorage.getItem('bft.pendingInvite'); }catch(e){}
+const isSuper=()=>MODE==='cloud'&&!!(S&&S.nuclei[ME.nucleusId]||{}).isSuper;
+/* ================= data ================= */
+const LS_KEY='bearFamilyTree.v7';
+const COUNTRIES=[['MY','Malaysia'],['SG','Singapore'],['AU','Australia'],['GB','United Kingdom'],
+ ['US','United States'],['ID','Indonesia'],['BN','Brunei'],['NZ','New Zealand'],['CA','Canada'],
+ ['AE','UAE'],['SA','Saudi Arabia'],['JP','Japan'],['KR','South Korea'],['CN','China'],['HK','Hong Kong'],
+ ['TW','Taiwan'],['IN','India'],['PH','Philippines'],['TH','Thailand'],['VN','Vietnam'],
+ ['DE','Germany'],['FR','France'],['NL','Netherlands'],['QA','Qatar'],['TR','Türkiye'],['EG','Egypt']];
+const MEM_STYLES=[
+ {id:'isl1',g:'Islam',w:'Returned to Allah on [date]',wo:'Returned to Allah'},
+ {id:'isl2',g:'Islam',w:'Allahyarham · [date]',wo:'Allahyarham'},
+ {id:'isl3',g:'Islam',w:'Allahyarhamah · [date]',wo:'Allahyarhamah'},
+ {id:'chr1',g:'Christian',w:'Went home to the Lord on [date]',wo:'Went home to the Lord'},
+ {id:'chr2',g:'Christian',w:'At rest in Christ · [date]',wo:'At rest in Christ'},
+ {id:'chr3',g:'Christian',w:'In loving memory · [date]',wo:'In loving memory'},
+ {id:'chi1',g:'Chinese traditions',w:'安息 · at rest · [date]',wo:'安息 · at rest'},
+ {id:'chi2',g:'Chinese traditions',w:'往生 on [date]',wo:'往生'},
+ {id:'gen1',g:'Generic',w:'Passed on [date]',wo:'Passed'},
+ {id:'gen2',g:'Generic',w:'Rest in peace · [date]',wo:'Rest in peace'},
+ {id:'custom',g:'Custom',w:'',wo:''}];
+
+function seed(){
+  const P=(id,name,g,born,c,claimed,passed)=>({id,name,gender:g||'',couplePos:'',born:born||'',
+    country:c||'',claimedBy:claimed||null,notes:'',passed:passed||null,photos:{},mainPhoto:'a'});
+  const persons={};
+  [ P('aizat','Aizat Taha','m',1990,'AU','n1'), P('sarah','Sarah Rahim','f',1991,'AU','n1'),
+    P('alya','Alya Aizat','f',2016,'AU','n1'), P('aisha','Aisha Aizat','f',2018,'AU','n1'),
+    P('atok','Ahmad Taha','m',1955,'MY','n2'), P('granny','Halimah Ismail','f',1954,'MY','n2'),
+    P('ina','Nur Aina Taha','f',1988,'MY','n3'),
+    P('baba','Rahim Abdullah','m',1958,'SG','n4'), P('mama','Noor Salleh','f',1960,'SG','n4'),
+    P('danish','Danish Rahim','m',1995,'SG',null),
+    P('tokwan','Mohd Taha','m',1928,'',null,{date:'2001-06-04',styleId:'isl1',custom:''}),
+    P('tokyang','Fatimah Ali','f',1934,'',null,{date:'2019-02-18',styleId:'isl3',custom:''}),
+    P('paklong','Zulkifli Taha','m',1950,'MY',null), P('makngah','Rohana Taha','f',1957,'GB',null),
+    P('tokbah','Ismail Yusof','m',1930,'',null,{date:'1998-08-02',styleId:'isl1',custom:''}),
+    P('tokmi','Saodah Musa','f',1936,'',null,{date:'',styleId:'gen1',custom:''}),
+    P('maklang','Mariam Ismail','f',1951,'MY',null), P('kamal','Kamal Ismail','m',1958,'SG',null),
+    P('farid','Farid Zulkifli','m',1985,'MY',null), P('dina','Dina Zulkifli','f',1989,'MY',null),
+    P('ros','Roslinda Hashim','f',1962,'MY',null), P('hafiz','Hafiz Kamal','m',1992,'SG',null),
+    P('aminah','Aminah Bee','f',1966,'SG',null),
+    P('iman','Iman Harun','m',1998,'SG',null),  // Aminah's son from her first marriage
+    P('mia','Mia Aina','f',2019,'MY',null)      // Kak Ina's daughter — auto-visible niece
+  ].forEach(p=>persons[p.id]=p);
+  const rel=(k,a,b)=>({kind:k,a,b});
+  const rels=[
+    rel('pt','tokwan','tokyang'),rel('pt','tokbah','tokmi'),rel('pt','atok','granny'),
+    rel('pt','baba','mama'),rel('pt','aizat','sarah'),
+    rel('pc','tokwan','atok'),rel('pc','tokyang','atok'),
+    rel('pc','tokwan','paklong'),rel('pc','tokyang','paklong'),
+    rel('pc','tokwan','makngah'),rel('pc','tokyang','makngah'),
+    rel('pc','tokbah','granny'),rel('pc','tokmi','granny'),
+    rel('pc','tokbah','maklang'),rel('pc','tokmi','maklang'),
+    rel('pc','tokbah','kamal'),rel('pc','tokmi','kamal'),
+    rel('pc','atok','ina'),rel('pc','granny','ina'),
+    rel('pc','atok','aizat'),rel('pc','granny','aizat'),
+    rel('pc','baba','sarah'),rel('pc','mama','sarah'),
+    rel('pc','baba','danish'),rel('pc','mama','danish'),
+    rel('pc','aizat','alya'),rel('pc','sarah','alya'),
+    rel('pc','aizat','aisha'),rel('pc','sarah','aisha'),
+    rel('pc','paklong','farid'),rel('pc','paklong','dina'),
+    {kind:'pt',a:'kamal',b:'ros',status:'divorced',ended:'2010'},
+    rel('pc','kamal','hafiz'),rel('pc','ros','hafiz'),
+    rel('pt','kamal','aminah'),
+    rel('pc','aminah','iman'),    // step-child: linked to Aminah only, not Kamal
+    rel('pc','ina','mia')];
+  const nicknames={
+    aizat:{atok:'Atok',granny:'Granny',baba:'Baba',mama:'Mama',ina:'Kak Ina',sarah:'Sayang',
+      paklong:'Pak Long',makngah:'Mak Ngah',tokwan:'Tok Wan',tokyang:'Tok Yang',
+      tokbah:'Tok Bah',tokmi:'Tok Mi',maklang:'Mak Lang',kamal:'Pak Ngah'},
+    sarah:{aizat:'Sayang',granny:'Mak',atok:'Ayah',baba:'Baba',mama:'Mama',danish:'Adik',ina:'Kak Ina'},
+    alya:{aizat:'Ayah',sarah:'Ibu',atok:'Atok',granny:'Granny',aisha:'Adik',ina:'Mak Ngah'},
+    aisha:{aizat:'Ayah',sarah:'Ibu',atok:'Atok',granny:'Granny',alya:'Kakak'},
+    ina:{aizat:'Adik',granny:'Mak',atok:'Ayah',paklong:'Pak Long'},
+    granny:{atok:'Yang',aizat:'Aizat',ina:'Ina'},
+    atok:{granny:'Yang'},
+    farid:{atok:'Pak Cik Mad',granny:'Opah',aizat:'Abang Long',paklong:'Ayah'},
+    dina:{granny:'Opah',aizat:'Abang Long'}};
+  const nuclei={
+    n1:{id:'n1',treeName:'BearFamily',label:"Aizat & Sarah's household"},
+    n2:{id:'n2',treeName:'Keluarga Taha',label:'Atok & Granny'},
+    n3:{id:'n3',treeName:'my family',label:'Kak Ina'},
+    n4:{id:'n4',treeName:'FAM',label:"Baba & Mama's household"}};
+  return {persons,rels,nicknames,nuclei,session:null,history:[],active:[]};
+}
+let S=null;
+function blankState(){ return {persons:{},rels:[],nicknames:{},nuclei:{},session:null,history:[],active:[]}; }
+function load(){ try{ const raw=localStorage.getItem(LS_KEY); if(raw){S=JSON.parse(raw);return;} }catch(e){}
+  S=seed(); save(); }
+function save(){
+  if(MODE==='cloud'){ // shared data write-through happens per mutation; only
+    // per-device prefs (who's viewing, which branches are open) persist here
+    try{ localStorage.setItem('bft.prefs.'+ME.userId,
+      JSON.stringify({session:S.session,history:S.history,active:S.active})); }catch(e){}
+    return; }
+  try{ localStorage.setItem(LS_KEY,JSON.stringify(S)); }catch(e){ toast('storage full — photo too large?'); } }
+
+/* ================= cloud data layer ================= */
+const MAIN2DB={k:'kid',t:'teen',a:'adult'}, DB2MAIN={kid:'k',teen:'t',adult:'a'};
+function personFromRow(r){ const photos={};
+  if(r.photo_kid)photos.k=r.photo_kid; if(r.photo_teen)photos.t=r.photo_teen; if(r.photo_adult)photos.a=r.photo_adult;
+  return {id:r.id,name:r.full_name,gender:r.gender||'',couplePos:r.couple_pos||'',born:r.born||'',
+    country:r.living_country||'',notes:r.notes||'',claimedBy:r.claimed_by,photos,
+    mainPhoto:DB2MAIN[r.main_photo]||'a',passed:null}; }
+async function cloudFetchAll(){
+  const [acc,nuc,per,rel,nick,mem]=await Promise.all([
+    sb.from('account').select('nucleus_id'),
+    sb.from('nucleus').select('*'),
+    sb.from('person').select('*').is('deleted_at',null),
+    sb.from('relationship').select('*'),
+    sb.from('nickname').select('*'),
+    sb.from('memorial').select('*')]);
+  for(const r of [acc,nuc,per,rel,nick,mem]) if(r.error)throw r.error;
+  ME.nucleusId=acc.data[0]?.nucleus_id||null;
+  if(!ME.nucleusId)return false; // no account row yet → onboarding
+  S.nuclei={}; nuc.data.forEach(n=>{S.nuclei[n.id]={id:n.id,treeName:n.tree_name,label:n.label,isSuper:!!n.is_super};});
+  ME.treeId=nuc.data.find(n=>n.id===ME.nucleusId)?.tree_id;
+  S.persons={}; per.data.forEach(r=>S.persons[r.id]=personFromRow(r));
+  mem.data.forEach(m=>{ const p=S.persons[m.person_id];
+    if(p)p.passed={date:m.passed_on||'',styleId:m.style_id||'gen1',custom:m.custom_text||''}; });
+  S.rels=rel.data.map(r=>({id:r.id,kind:r.kind==='partner'?'pt':'pc',a:r.person_a,b:r.person_b,
+    status:r.status||'together',ended:r.ended||undefined}));
+  S.nicknames={}; nick.data.forEach(n=>{
+    (S.nicknames[n.viewer_person_id]=S.nicknames[n.viewer_person_id]||{})[n.person_id]=n.text; });
+  return true; }
+function dbErr(e){ console.error('sync',e); toast('sync failed — '+((e&&e.message)||e)); }
+const db={
+  on:()=>MODE==='cloud',
+  async upsertNick(viewer,pid,text){ if(!db.on())return;
+    if(text){ const {error}=await sb.from('nickname').upsert(
+      {tree_id:ME.treeId,person_id:pid,viewer_person_id:viewer,text},
+      {onConflict:'person_id,viewer_person_id'}); if(error)dbErr(error); }
+    else { const {error}=await sb.from('nickname').delete()
+      .match({person_id:pid,viewer_person_id:viewer}); if(error)dbErr(error); } },
+  async savePerson(p){ if(!db.on())return;
+    const {error}=await sb.from('person').update({full_name:p.name,gender:p.gender||null,
+      couple_pos:p.couplePos||null,born:p.born||null,living_country:p.country||null,
+      notes:p.notes||'',main_photo:MAIN2DB[p.mainPhoto]||'adult',
+      photo_kid:p.photos.k||null,photo_teen:p.photos.t||null,photo_adult:p.photos.a||null})
+      .eq('id',p.id); if(error)dbErr(error); },
+  async saveMemorial(p){ if(!db.on())return;
+    if(p.passed){ const {error}=await sb.from('memorial').upsert({person_id:p.id,tree_id:ME.treeId,
+      passed_on:p.passed.date||null,style_id:p.passed.styleId||'gen1',custom_text:p.passed.custom||null});
+      if(error)dbErr(error); }
+    else { const {error}=await sb.from('memorial').delete().eq('person_id',p.id); if(error)dbErr(error); } },
+  async insertPerson(p){ if(!db.on())return;
+    const {error}=await sb.from('person').insert({id:p.id,tree_id:ME.treeId,full_name:p.name,
+      gender:p.gender||null,born:p.born||null,living_country:p.country||null,
+      claimed_by:p.claimedBy||null}); if(error)dbErr(error); },
+  async insertRel(r){ if(!db.on())return;
+    const {data,error}=await sb.from('relationship').insert({tree_id:ME.treeId,
+      person_a:r.a,person_b:r.b,kind:r.kind==='pt'?'partner':'parent-child',
+      status:r.status||'together',ended:r.ended||null}).select('id').single();
+    if(error)dbErr(error); else r.id=data.id; },
+  async updateRel(r){ if(!db.on()||!r.id)return;
+    const {error}=await sb.from('relationship').update({status:r.status||'together',ended:r.ended||null})
+      .eq('id',r.id); if(error)dbErr(error); },
+  async deleteRelPair(a,b){ if(!db.on())return;
+    const {error}=await sb.from('relationship').delete().eq('kind','partner')
+      .or(`and(person_a.eq.${a},person_b.eq.${b}),and(person_a.eq.${b},person_b.eq.${a})`);
+    if(error)dbErr(error); },
+  async claim(pid){ if(!db.on())return;
+    const {error}=await sb.rpc('claim_person',{p:pid}); if(error)dbErr(error); },
+  async renameNucleus(name){ if(!db.on())return;
+    const {error}=await sb.from('nucleus').update({tree_name:name}).eq('id',ME.nucleusId);
+    if(error)dbErr(error); },
+  async invite(){ const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId})
+    .select('code').single(); if(error){dbErr(error);return null;} return data.code; } };
+let refetchT=null;
+function scheduleRefetch(){ if(MODE!=='cloud')return; clearTimeout(refetchT);
+  refetchT=setTimeout(async()=>{ try{ await cloudFetchAll(); rebuild(); }catch(e){} },1200); }
+window.addEventListener('focus',scheduleRefetch);
+function subscribeRealtime(){ if(!sb||MODE!=='cloud')return;
+  try{ sb.channel('bft').on('postgres_changes',{event:'*',schema:'public'},scheduleRefetch).subscribe(); }catch(e){} }
+
+/* ================= graph helpers ================= */
+const person=id=>S.persons[id];
+const parentsOf=id=>S.rels.filter(r=>r.kind==='pc'&&r.b===id).map(r=>r.a);
+const childrenOf=id=>S.rels.filter(r=>r.kind==='pc'&&r.a===id).map(r=>r.b);
+const partnersOf=id=>S.rels.filter(r=>r.kind==='pt'&&(r.a===id||r.b===id)).map(r=>r.a===id?r.b:r.a);
+const partnerOf=id=>partnersOf(id).find(x=>relStatus(id,x)==='together')||partnersOf(id)[0]||null;
+function partnerRelOf(a,b){ return S.rels.find(r=>r.kind==='pt'&&
+  ((r.a===a&&r.b===b)||(r.a===b&&r.b===a))); }
+function relStatus(a,b){ const r=partnerRelOf(a,b); return (r&&r.status)||'together'; }
+function sharedChildren(a,b){ const cb=new Set(childrenOf(b));
+  return childrenOf(a).filter(c=>cb.has(c)); }
+function marriedInExOnly(pid,vis){ // on canvas only through an ended partnership
+  if(parentsOf(pid).some(x=>vis.has(x))||siblingsOf(pid).some(x=>vis.has(x)))return false;
+  const vps=partnersOf(pid).filter(x=>vis.has(x));
+  if(!vps.length)return false;
+  return vps.every(x=>relStatus(pid,x)!=='together'); }
+function siblingsOf(id){ const s=new Set();
+  parentsOf(id).forEach(p=>childrenOf(p).forEach(c=>{if(c!==id)s.add(c);})); return [...s]; }
+function neighborsOf(id){ return [...new Set([...parentsOf(id),...childrenOf(id),...partnersOf(id)])]; }
+function nucleusMembers(nid){ return Object.values(S.persons).filter(p=>p.claimedBy===nid).map(p=>p.id); }
+function branchDistance(pid){ // min hops from my nucleus's claimed people
+  const seeds=nucleusMembers(S.session.nucleusId);
+  if(seeds.includes(pid))return 0;
+  const seen=new Set(seeds); let front=seeds,d=0;
+  while(front.length){ d++; const nxt=[];
+    for(const f of front) for(const n of neighborsOf(f)) if(!seen.has(n)){seen.add(n);nxt.push(n);if(n===pid)return d;}
+    front=nxt; if(d>50)break; }
+  return Infinity; }
+function canEditPerson(pid){ const p=person(pid);
+  return p.claimedBy ? p.claimedBy===S.session.nucleusId : branchDistance(pid)<=5; }
+function canEditMemorial(pid){ return branchDistance(pid)<=5; }
+
+/* ================= names / display ================= */
+const viewing=()=>S.session.viewingAs;
+function nickFor(pid){ return (S.nicknames[viewing()]||{})[pid]||''; }
+function displayName(pid){ return nickFor(pid)||person(pid).name.split(' ')[0]; }
+function flagEmoji(cc){ if(!cc)return ''; return cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt(0))); }
+function fmtDate(d){ if(!d)return ''; if(/^\d{4}$/.test(d))return d;
+  const dt=new Date(d+'T00:00:00'); if(isNaN(dt))return d;
+  return dt.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()]+' '+dt.getFullYear(); }
+function memorialLine(p){ if(!p.passed)return '';
+  const st=MEM_STYLES.find(s=>s.id===p.passed.styleId)||MEM_STYLES.find(s=>s.id==='gen1');
+  let t; const d=p.passed.date;
+  if(st.id==='custom'){ t=p.passed.custom||'Passed'; if(!d)t=t.replace(/\s*(on|·)?\s*\[date\]/,''); }
+  else t=d?st.w:st.wo;
+  if(d){ const yearOnly=/^\d{4}$/.test(d); if(yearOnly)t=t.replace('on [date]','in [date]');
+    t=t.replace('[date]',fmtDate(d)); }
+  return t; }
+function relationLabel(pid){ const me=viewing(); if(pid===me)return "that's you 🐻";
+  if(parentsOf(me).includes(pid))return 'your parent';
+  if(childrenOf(me).includes(pid))return 'your child';
+  if(partnersOf(me).includes(pid))return 'your partner';
+  if(siblingsOf(me).includes(pid))return 'your sibling';
+  const gp=parentsOf(me).flatMap(parentsOf); if(gp.includes(pid))return 'your grandparent';
+  const pibling=parentsOf(me).flatMap(siblingsOf); if(pibling.includes(pid))return "your parent's sibling";
+  const inlaw=partnersOf(me).flatMap(parentsOf); if(inlaw.includes(pid))return 'your parent-in-law';
+  const d=branchDistanceFrom(me,pid); return d===Infinity?'family':'family · '+d+(d===1?' branch':' branches')+' away'; }
+function branchDistanceFrom(a,b){ if(a===b)return 0; const seen=new Set([a]); let front=[a],d=0;
+  while(front.length){ d++; const nxt=[];
+    for(const f of front) for(const n of neighborsOf(f)) if(!seen.has(n)){seen.add(n);nxt.push(n);if(n===b)return d;}
+    front=nxt; if(d>50)break;} return Infinity; }
+
+/* ================= expansions / visibility ================= */
+function expKey(e){ return e.kind+':'+e.pid; }
+function defaultExpansions(){ const me=viewing();
+  // one side per couple, always: the default view opens on YOUR side;
+  // your partner's side sits behind its ⊕ chip and the two swap, never coexist.
+  // your own siblings' families (nieces & nephews) open by default too —
+  // each with its ⊖ chip if you want them folded
+  const list=[{kind:'family',pid:me,from:'nucleus',locked:true},{kind:'side',pid:me,from:'nucleus'}];
+  for(const s of siblingsOf(me))list.push({kind:'family',pid:s,from:'side:'+me});
+  return list; }
+function ensureDefaults(){ for(const d of defaultExpansions()){
+    if(!S.history.find(e=>expKey(e)===expKey(d)))S.history.push(d);
+    if(!S.active.includes(expKey(d)))S.active.push(expKey(d)); } }
+let revealedBy=new Map();
+function computeVisible(){ revealedBy=new Map();
+  const vis=new Set(nucleusMembers(S.session.nucleusId));
+  vis.forEach(p=>revealedBy.set(p,'nucleus'));
+  // ensure viewer visible even if nucleus empty
+  if(!vis.has(viewing())){vis.add(viewing());revealedBy.set(viewing(),'nucleus');}
+  let changed=true;
+  while(changed){ changed=false;
+    for(const e of S.history){ if(!S.active.includes(expKey(e)))continue;
+      if(!vis.has(e.pid))continue;
+      const adds=e.kind==='side'
+        ?[...parentsOf(e.pid),
+          ...siblingsOf(e.pid).flatMap(s=>[s,...partnersOf(s).filter(x=>relStatus(s,x)==='together')])]
+        :[...partnersOf(e.pid),...childrenOf(e.pid)];
+      for(const a of adds) if(!vis.has(a)){vis.add(a);revealedBy.set(a,expKey(e));changed=true;} } }
+  return vis; }
+function hiddenDeepCount(seeds,vis){ const seen=new Set(vis); let cnt=0,front=[];
+  for(const s of seeds) if(!seen.has(s)){seen.add(s);front.push(s);cnt++;}
+  while(front.length){ const nxt=[];
+    for(const f of front) for(const n of neighborsOf(f)) if(!seen.has(n)){seen.add(n);nxt.push(n);cnt++;}
+    front=nxt;} return cnt; }
+function chainKeys(pid){ // expansion chain that reveals pid
+  const keys=new Set(); let k=revealedBy.get(pid);
+  while(k&&k!=='nucleus'){ keys.add(k); const e=S.history.find(x=>expKey(x)===k); if(!e)break; k=e.from; }
+  return keys; }
+function anchorCapture(pid){ const p=layout.pos[pid]; if(!p)return null;
+  return {sx:p.x*view.s+view.tx, sy:p.y*view.s+view.ty}; }
+function snapshotPositions(){ const o={}; for(const k in layout.pos)o[k]={...layout.pos[k]}; return o; }
+/* screen-space animation correction (FLIP): after a relayout + view shift,
+   a node that lands on the SAME screen spot must not move at all (the
+   nucleus stays rock-still); everything else glides by its true on-screen
+   delta. New nodes still grow out of the clicked node. */
+function flipExisting(oldPos,oldView){
+  const dxV=(view.tx-oldView.tx)/view.s, dyV=(view.ty-oldView.ty)/view.s;
+  for(const el of nodesEl.querySelectorAll('.node')){
+    const pid=el.dataset.pid, op=oldPos[pid];
+    if(!op)continue; // newly spawned — handled by the grow-out logic
+    const tx=parseFloat(el.style.left)+NODE_W/2, ty=parseFloat(el.style.top);
+    const offX=(op.x-tx)-dxV, offY=(op.y-ty)-dyV;
+    if(Math.abs(offX)<.5&&Math.abs(offY)<.5){ // stationary on screen: snap, no glide
+      el.style.transition='none';
+      el.style.left=(tx-NODE_W/2)+'px'; el.style.top=ty+'px';
+      void el.offsetWidth; el.style.transition=''; continue; }
+    el.style.transition='none';
+    el.style.left=(tx-NODE_W/2+offX)+'px'; el.style.top=(ty+offY)+'px';
+    void el.offsetWidth; el.style.transition='';
+    el.style.left=(tx-NODE_W/2)+'px'; el.style.top=ty+'px'; } }
+function anchorRestore(pid,a){ const p=layout.pos[pid];
+  if(a&&p){ view.tx=a.sx-p.x*view.s; view.ty=a.sy-p.y*view.s; applyView(); }
+  else centerOn(pid); }
+function addExpansion(kind,pid){ computeVisible();
+  // camera anchors to YOUR node, always — the nucleus is the fixed point
+  // of the universe; deep blocks may drift to make room, the view never jumps
+  const anchor=anchorCapture(viewing());
+  const oldPos=snapshotPositions(), oldView={...view};
+  const key=kind+':'+pid;
+  let e=S.history.find(x=>expKey(x)===key);
+  if(!e){ e={kind,pid,from:revealedBy.get(pid)||'nucleus'}; S.history.push(e); }
+  // the one-side-at-a-time rule: keep only your nucleus + the chain that
+  // leads to this expansion — every other branch (the partner's side at
+  // every couple along the way) folds back to its ⊕ chip
+  const keep=new Set([...defaultExpansions().map(expKey)].filter(k=>k.startsWith('family:')));
+  chainKeys(pid).forEach(k=>keep.add(k));
+  keep.add(key);
+  S.active=S.active.filter(k=>keep.has(k));
+  [...keep].forEach(k=>{if(!S.active.includes(k))S.active.push(k);});
+  save(); rebuild(pid); anchorRestore(viewing(),anchor); flipExisting(oldPos,oldView);
+  updateFocusBar(kind==='side'?displayName(pid)+"'s side":displayName(pid)+"'s family"); }
+function removeExpansion(kind,pid){ const key=kind+':'+pid;
+  const anchor=anchorCapture(viewing());
+  const oldPos=snapshotPositions(), oldView={...view};
+  S.active=S.active.filter(k=>k!==key);
+  S.history=S.history.filter(e=>expKey(e)!==key||e.locked);
+  save(); rebuild(pid); anchorRestore(viewing(),anchor); flipExisting(oldPos,oldView);
+  updateFocusBar(); }
+function resetView(){
+  const oldPos=snapshotPositions(), oldView={...view};
+  S.active=defaultExpansions().map(expKey);
+  save(); rebuild(viewing()); centerOn(viewing()); flipExisting(oldPos,oldView);
+  updateFocusBar(); }
+function updateFocusBar(label){
+  const bar=document.getElementById('focusbar');
+  const def=new Set(defaultExpansions().map(expKey));
+  const extra=S.active.filter(k=>!def.has(k));
+  const parked=S.history.map(expKey).filter(k=>!S.active.includes(k));
+  if(extra.length||parked.length){ bar.style.display='flex';
+    document.getElementById('focuslabel').textContent='focused: '+(label||lastFocusLabel||'branch');
+    if(label)lastFocusLabel=label;
+  } else bar.style.display='none'; }
+let lastFocusLabel='';
+
+/* ================= layout =================
+   Deterministic hierarchical layout:
+   - siblings ordered oldest → youngest, left → right
+   - couples: husband left, wife right (gender), or the couple's own
+     left/right choice (couplePos) which always wins
+   - in-law parents (satellite roots) hang beside their child
+   Deterministic means expanding a side never reshuffles the rest. */
+const NODE_W=120, COUPLE=140, ROW_H=200, PAD=140, UNIT_S=170, UNIT_C=310, SIB_GAP=24;
+let layout={pos:{},bounds:{w:800,h:600}};
+function coupleOrder(a,b){ const A=person(a),B=person(b);
+  if(A.couplePos==='left'||B.couplePos==='right')return [a,b];
+  if(A.couplePos==='right'||B.couplePos==='left')return [b,a];
+  if(A.gender==='m'&&B.gender==='f')return [a,b];
+  if(A.gender==='f'&&B.gender==='m')return [b,a];
+  return [a,b].sort(); }
+function bornVal(pid){ const b=parseInt(person(pid).born); return isNaN(b)?9999:b; }
+function computeLayout(vis){
+  const gens=new Map(); gens.set(viewing(),0);
+  let front=[viewing()];
+  while(front.length){ const nxt=[];
+    for(const f of front){ const g=gens.get(f);
+      for(const p of parentsOf(f)) if(vis.has(p)&&!gens.has(p)){gens.set(p,g+1);nxt.push(p);}
+      for(const c of childrenOf(f)) if(vis.has(c)&&!gens.has(c)){gens.set(c,g-1);nxt.push(c);}
+      for(const pt of partnersOf(f)) if(vis.has(pt)&&!gens.has(pt)){gens.set(pt,g);nxt.push(pt);}
+      for(const s of siblingsOf(f)) if(vis.has(s)&&!gens.has(s)){gens.set(s,g);nxt.push(s);} }
+    front=nxt; }
+  // ---- units (couples paired, ordered) ----
+  const unitOf={}; const units=[];
+  const sortedIds=[...vis].filter(p=>gens.has(p)).sort();
+  const pick=pid=>{ // a person's first choice: earliest still-current marriage,
+    // else an ended one while shared children are on screen
+    const cands=partnersOf(pid).filter(x=>vis.has(x)&&gens.get(x)===gens.get(pid)&&!unitOf[x]);
+    return cands.find(x=>relStatus(pid,x)==='together')
+         ||cands.find(x=>sharedChildren(pid,x).some(c=>vis.has(c)))||null; };
+  const mkUnit=members=>{ const u={members,g:gens.get(members[0]),children:[],parent:null,
+      via:null,secAnchor:null,attach:[],attachedTo:null,placed:false,x:0,_w:0,_cw:0};
+    members.forEach(m=>unitOf[m]=u); units.push(u); };
+  // pass 1: mutual first-choice couples — so with multiple concurrent
+  // marriages the first wife pairs and later wives stand beside
+  for(const pid of sortedIds){ if(unitOf[pid])continue;
+    const pt=pick(pid);
+    if(pt&&pick(pt)===pid)mkUnit(coupleOrder(pid,pt)); }
+  // pass 2: everyone else stands alone
+  for(const pid of sortedIds) if(!unitOf[pid])mkUnit([pid]);
+  // ---- parent links: primary lineage + satellite (in-law) anchors ----
+  // a child prefers hanging under the unit holding BOTH parents; if the
+  // parents split (divorce + remarriage), the lone ex-parent wins over
+  // the parent who re-coupled, so the child stays under their own line
+  for(const u of units){ const cands=[];
+    for(const m of u.members){
+      const pus=[...new Set(parentsOf(m).filter(p=>vis.has(p)&&unitOf[p]&&unitOf[p]!==u).map(p=>unitOf[p]))];
+      for(const pu of pus){
+        const pc=pu.members.filter(x=>parentsOf(m).includes(x)).length;
+        cands.push({pu,via:m,score:pc===2?0:(pu.members.length===1?1:2)}); } }
+    cands.sort((a,b)=>a.score-b.score);
+    if(cands.length){ u.parent=cands[0].pu; u.via=cands[0].via; u.parent.children.push(u);
+      for(const c of cands.slice(1)) if(c.pu!==u.parent) c.pu.secAnchor={unit:u,via:c.via}; } }
+  for(const u of units) u.children.sort((a,b)=>bornVal(a.via)-bornVal(b.via)
+    ||person(a.via).name.localeCompare(person(b.via).name));
+  const unitW=u=>u.members.length>1?UNIT_C:UNIT_S;
+  // exes & additional current partners ATTACH to their partner's unit on
+  // the outer side — they travel with the subtree, always adjacent, and
+  // their width is budgeted so separate family blocks never interleave
+  let mainU=unitOf[viewing()]; while(mainU.parent)mainU=mainU.parent;
+  for(const r of units){ if(r.parent||r.secAnchor||r===mainU)continue;
+    let done=false;
+    for(const m of r.members){ for(const p of partnersOf(m)){ const pu=unitOf[p];
+      if(pu&&pu!==r){ const side=pu.members.length>1&&pu.members[0]===p?'left':'right';
+        pu.attach.push({unit:r,side}); r.attachedTo=pu; done=true; break; } }
+      if(done)break; } }
+  function coreWidth(u){ if(u._cw)return u._cw;
+    const cw=u.children.reduce((s,c)=>s+width(c),0)+Math.max(0,u.children.length-1)*SIB_GAP;
+    return u._cw=Math.max(unitW(u),cw); }
+  function width(u){ if(u._w)return u._w;
+    return u._w=coreWidth(u)+u.attach.reduce((s,a)=>s+width(a.unit)+40,0); }
+  function place(u,left){
+    for(const a of u.attach.filter(a=>a.side==='left')){ place(a.unit,left); left+=width(a.unit)+40; }
+    const cw=coreWidth(u);
+    if(u.children.length){
+      const kidsW=u.children.reduce((s,c)=>s+width(c),0)+(u.children.length-1)*SIB_GAP;
+      let cx=left+(cw-kidsW)/2;
+      for(const c of u.children){ place(c,cx); cx+=width(c)+SIB_GAP; }
+      u.x=(u.children[0].x+u.children[u.children.length-1].x)/2; }
+    else u.x=left+cw/2;
+    let x=left+cw;
+    for(const a of u.attach.filter(a=>a.side==='right')){ place(a.unit,x+40); x+=40+width(a.unit); }
+    u.placed=true; }
+  // ---- roots: main lineage first, then satellites beside their child ----
+  // placeClear keeps each subtree an intact block: if it would overlap an
+  // already-placed subtree in ANY row, the WHOLE subtree slides aside —
+  // separate family lines never interleave
+  function subUnitsOf(r){ const arr=[]; (function c(u){arr.push(u);
+    u.children.forEach(c); u.attach.forEach(a=>c(a.unit));})(r); return arr; }
+  function placeClear(r,left,dir){ place(r,left);
+    const sub=new Set(subUnitsOf(r));
+    for(let it=0;it<12;it++){ let shift=0;
+      for(const s of sub){ for(const p of units){
+        if(sub.has(p)||!p.placed||p.g!==s.g)continue;
+        const sl=s.x-unitW(s)/2, sr=s.x+unitW(s)/2, pl=p.x-unitW(p)/2, pr=p.x+unitW(p)/2;
+        if(sl<pr+SIB_GAP&&sr>pl-SIB_GAP){
+          const need=dir>0?(pr+SIB_GAP-sl):(sr-(pl-SIB_GAP));
+          if(need>shift)shift=need; } } }
+      if(shift<=0)break;
+      for(const s of sub)s.x+=dir*shift; } }
+  place(mainU,0);
+  const roots=units.filter(u=>!u.parent&&!u.placed&&!u.attachedTo);
+  const anchorX=r=>{ const au=r.secAnchor.unit;
+    return au.members.length>1
+      ?(au.members[0]===r.secAnchor.via?au.x-COUPLE/2:au.x+COUPLE/2):au.x; };
+  let guard=0;
+  while(roots.some(r=>!r.placed)&&guard++<20){
+    const ready=roots.filter(r=>!r.placed&&r.secAnchor&&r.secAnchor.unit.placed);
+    if(ready.length){ // nearest-to-centre anchors place first, left→right —
+      // each side fans outward in kinship order (viewer's maternal side ends
+      // by the couple's middle; the partner's side mirrors on the right) and
+      // blocks can never leapfrog into each other
+      ready.sort((a,b)=>anchorX(a)-anchorX(b));
+      for(const r of ready)placeClear(r,anchorX(r)+100-width(r)/2+(width(r)/2-unitW(r)/2),1); }
+    else { const r=roots.find(x=>!x.placed);
+      const maxX=Math.max(0,...units.filter(u=>u.placed).map(u=>u.x+unitW(u)/2));
+      placeClear(r,maxX+120,1); } }
+  // ---- per-row de-overlap sweep (residual safety only) ----
+  const byRow=new Map();
+  for(const u of units){ if(!byRow.has(u.g))byRow.set(u.g,[]); byRow.get(u.g).push(u); }
+  for(const row of byRow.values()){ row.sort((a,b)=>a.x-b.x);
+    for(let i=1;i<row.length;i++){ const prev=row[i-1],cur=row[i];
+      const minX=prev.x+unitW(prev)/2+SIB_GAP+unitW(cur)/2;
+      if(cur.x<minX)cur.x=minX; } }
+  // ---- emit positions ----
+  const genVals=[...new Set(units.map(u=>u.g))].sort((a,b)=>b-a);
+  const gmax=genVals[0];
+  const pos={}; let minX=Infinity,maxX=-Infinity;
+  for(const u of units){ const y=(gmax-u.g)*ROW_H+PAD/2;
+    if(u.members.length===1){ pos[u.members[0]]={x:u.x,y}; }
+    else { pos[u.members[0]]={x:u.x-COUPLE/2,y}; pos[u.members[1]]={x:u.x+COUPLE/2,y}; }
+    minX=Math.min(minX,u.x-unitW(u)/2); maxX=Math.max(maxX,u.x+unitW(u)/2); }
+  const off=PAD-minX;
+  for(const k in pos)pos[k].x+=off;
+  const w=maxX-minX+PAD*2, h=genVals.length*ROW_H+PAD+120;
+  layout={pos,gens,bounds:{w:Math.max(w,600),h:Math.max(h,400)},unitOf};
+}
+
+/* ================= render tree ================= */
+const worldEl=document.getElementById('world'), nodesEl=document.getElementById('nodes'),
+      edgesEl=document.getElementById('edges');
+let view={tx:0,ty:0,s:1};
+function applyView(){ worldEl.style.transform=`translate(${view.tx}px,${view.ty}px) scale(${view.s})`; drawMinimap(); }
+const nodeEls=new Map(); let edgeT=null;
+function rebuild(origin){
+  const vis=computeVisible(); computeLayout(vis);
+  const {pos,bounds}=layout;
+  worldEl.style.width=bounds.w+'px'; worldEl.style.height=bounds.h+'px';
+  edgesEl.setAttribute('width',bounds.w); edgesEl.setAttribute('height',bounds.h);
+  // edges
+  let svg='';
+  const drawn=new Set();
+  for(const pid of vis){ const p=pos[pid]; if(!p)continue;
+    // couple line
+    for(const pt of partnersOf(pid)){ if(!vis.has(pt)||!pos[pt])continue;
+      const key=[pid,pt].sort().join('~'); if(drawn.has(key))continue; drawn.add(key);
+      const a=pos[pid],b=pos[pt]; if(Math.abs(a.y-b.y)>2)continue;
+      if(Math.abs(a.x-b.x)>420)continue; // not adjacent — link lives in the sheet only
+      const rel=partnerRelOf(pid,pt); const st=(rel&&rel.status)||'together';
+      const x1=Math.min(a.x,b.x)+32,x2=Math.max(a.x,b.x)-32,y=a.y+32,mx=(a.x+b.x)/2;
+      if(st==='together'){
+        svg+=`<line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5"/>`;
+        svg+=`<circle cx="${mx}" cy="${y}" r="3.5" fill="#B4CEFF"/>`; }
+      else { // broken line + genealogical ⫽ divorce mark + chip badge
+        svg+=`<line x1="${x1}" y1="${y}" x2="${mx-16}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5" stroke-dasharray="5 5"/>`;
+        svg+=`<line x1="${mx+16}" y1="${y}" x2="${x2}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5" stroke-dasharray="5 5"/>`;
+        svg+=`<text x="${mx}" y="${y+5}" text-anchor="middle" font-size="15" font-weight="600" fill="#6B7A90" font-family="Poppins,sans-serif">⫽</text>`;
+        const lab=st+(rel&&rel.ended?' · '+rel.ended:''); const lw=lab.length*6+18;
+        svg+=`<rect x="${mx-lw/2}" y="${y-32}" width="${lw}" height="19" rx="9.5" fill="#E4EEFF"/>`;
+        svg+=`<text x="${mx}" y="${y-19}" text-anchor="middle" font-size="10.5" font-weight="500" fill="#004A98" font-family="Poppins,sans-serif">${esc(lab)}</text>`; } } }
+  // parent→children rails, grouped by parent set
+  const famGroups=new Map();
+  for(const pid of vis){ const ps=parentsOf(pid).filter(x=>vis.has(x)&&pos[x]);
+    if(!ps.length||!pos[pid])continue;
+    const key=ps.sort().join('~'); if(!famGroups.has(key))famGroups.set(key,{parents:ps,kids:[]});
+    famGroups.get(key).kids.push(pid); }
+  for(const {parents,kids} of famGroups.values()){
+    let ax,ay;
+    if(parents.length===2&&Math.abs(pos[parents[0]].y-pos[parents[1]].y)<2){
+      ax=(pos[parents[0]].x+pos[parents[1]].x)/2; ay=pos[parents[0]].y+32+4; }
+    else { ax=pos[parents[0]].x; ay=pos[parents[0]].y+68; }
+    const kidY=Math.min(...kids.map(k=>pos[k].y));
+    const railY=kidY-22;
+    const xs=kids.map(k=>pos[k].x);
+    const x1=Math.min(...xs,ax),x2=Math.max(...xs,ax);
+    svg+=`<path d="M${ax} ${ay} V${railY}" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>`;
+    if(xs.length>1||Math.abs(ax-xs[0])>2)
+      svg+=`<path d="M${Math.min(...xs)} ${railY} H${Math.max(...xs,ax)} M${x1} ${railY} H${x2}" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>`;
+    for(const k of kids) svg+=`<path d="M${pos[k].x} ${railY} V${pos[k].y-4}" fill="none" stroke="#E6E5E5" stroke-width="1.5"/>`; }
+  // edges hide while nodes glide, then fade back in
+  edgesEl.style.opacity='0'; edgesEl.innerHTML=svg;
+  clearTimeout(edgeT); edgeT=setTimeout(()=>{edgesEl.style.opacity='1';},origin?540:80);
+  // nodes — reconciled elements GLIDE to new positions; new people grow out
+  // of the node that was clicked (origin), removed ones retreat into it
+  const originPos=origin&&pos[origin]?pos[origin]:null;
+  const seen=new Set();
+  for(const pid of vis){ const p=pos[pid]; if(!p)continue; seen.add(pid);
+    const per=person(pid); const isYou=pid===viewing();
+    const passed=!!per.passed;
+    const photo=per.photos[per.mainPhoto]||per.photos.a||per.photos.t||per.photos.k;
+    const initials=per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+    const nick=nickFor(pid)||per.name.split(' ')[0];
+    let inner=`<button class="addfab" data-add="${pid}" title="add relative">＋</button>
+      <div class="avatar">${photo?`<img src="${photo}" alt="">`:initials}
+        ${(!passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>
+      <div class="nick">${esc(nick)}</div><div class="full">${esc(per.name)}</div>
+      ${passed?`<div class="passedon">${esc(memorialLine(per))}</div>`:''}
+      ${isYou?'<span class="youchip">you</span>':''}`;
+    // chips live inside the node so they travel with it
+    const chipBase=(passed?116:104)+(isYou?26:0);
+    const chips=[];
+    const sideKey='side:'+pid, famKey='family:'+pid;
+    const sideHidden=[...parentsOf(pid),
+      ...siblingsOf(pid).flatMap(s=>[s,...partnersOf(s).filter(x=>relStatus(s,x)==='together')])]
+      .filter(x=>!vis.has(x));
+    const famHidden=[...partnersOf(pid),...childrenOf(pid)].filter(x=>!vis.has(x));
+    if(S.active.includes(sideKey)&&[...parentsOf(pid),...siblingsOf(pid)].some(x=>vis.has(x)&&revealedBy.get(x)===sideKey))
+      chips.push({t:'⊖ collapse',cls:'',act:()=>removeExpansion('side',pid)});
+    else if(sideHidden.length){ const n=hiddenDeepCount(sideHidden,vis);
+      chips.push({t:`⊕ ${esc(displayName(pid))}'s side · ${n}`,cls:'',act:()=>addExpansion('side',pid)}); }
+    if(S.active.includes(famKey)&&[...partnersOf(pid),...childrenOf(pid)].some(x=>vis.has(x)&&revealedBy.get(x)===famKey))
+      chips.push({t:'⊖ family',cls:'ghost',act:()=>removeExpansion('family',pid)});
+    else if(famHidden.length){ const n=hiddenDeepCount(famHidden,vis);
+      chips.push({t:`⊕ family · ${n}`,cls:'ghost',act:()=>addExpansion('family',pid)}); }
+    chips.forEach((c,i)=>{ inner+=`<button class="xchip ${c.cls}" data-chip="${pid}:${i}" style="left:50%;top:${chipBase+i*30}px;">${c.t}</button>`;
+      pendingChips[pid+':'+i]=c.act; });
+    const cls=`node${isYou?' you':''}${passed?' passed':''}${!passed&&marriedInExOnly(pid,vis)?' exdim':''}`;
+    let el=nodeEls.get(pid);
+    if(!el){ // clear any retreating ghost of the same person first
+      nodesEl.querySelectorAll(`.node.spawn[data-pid="${pid}"]`).forEach(g=>g.remove());
+      el=document.createElement('div'); el.dataset.pid=pid;
+      nodeEls.set(pid,el); nodesEl.appendChild(el);
+      el.className=cls+' spawn'; el.innerHTML=inner;
+      const sp=originPos||p;
+      el.style.left=(sp.x-NODE_W/2)+'px'; el.style.top=sp.y+'px';
+      const release=()=>{ if(!nodeEls.has(pid)||nodeEls.get(pid)!==el)return;
+        el.classList.remove('spawn');
+        el.style.left=(p.x-NODE_W/2)+'px'; el.style.top=p.y+'px'; };
+      requestAnimationFrame(()=>requestAnimationFrame(release));
+      setTimeout(release,90); /* fallback if frames stall */ }
+    else { el.className=cls; el.innerHTML=inner;
+      el.style.left=(p.x-NODE_W/2)+'px'; el.style.top=p.y+'px'; }
+  }
+  for(const [pid,el] of [...nodeEls]){ if(seen.has(pid))continue;
+    nodeEls.delete(pid);
+    if(originPos){ el.classList.add('spawn');
+      el.style.left=(originPos.x-NODE_W/2)+'px'; el.style.top=originPos.y+'px';
+      setTimeout(()=>el.remove(),620); }
+    else el.remove(); }
+  drawMinimap(); }
+const pendingChips={};
+function esc(s){ return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+nodesEl.addEventListener('click',e=>{
+  const add=e.target.closest('.addfab');
+  if(add){ openAdd(add.dataset.add); return; }
+  const chip=e.target.closest('.xchip');
+  if(chip){ const act=pendingChips[chip.dataset.chip]; if(act)act(); return; }
+  const node=e.target.closest('.node');
+  if(node&&!dragMoved){ // single click selects (floats the ＋); double-click opens
+    nodesEl.querySelectorAll('.node.selected').forEach(n=>n.classList.remove('selected'));
+    node.classList.add('selected'); } });
+nodesEl.addEventListener('dblclick',e=>{
+  if(e.target.closest('.addfab')||e.target.closest('.xchip'))return;
+  const node=e.target.closest('.node');
+  if(node&&!dragMoved)openPerson(node.dataset.pid); });
+document.getElementById('viewport').addEventListener('click',e=>{ if(!e.target.closest('.node'))
+  nodesEl.querySelectorAll('.node.selected').forEach(n=>n.classList.remove('selected')); });
+
+/* ================= pan / zoom ================= */
+const vp=document.getElementById('viewport');
+let dragMoved=false;
+(function(){
+  const pointers=new Map(); let last=null,pinchD=0;
+  vp.addEventListener('pointerdown',e=>{ if(e.target.closest('.xchip')||e.target.closest('#focusbar')||e.target.closest('#minimap'))return;
+    // NOTE: no setPointerCapture here — capturing on press retargets the
+    // click/dblclick to the canvas and node taps never fire. We capture
+    // only once a real drag begins (in pointermove).
+    pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    dragMoved=false;
+    if(pointers.size===1)last={x:e.clientX,y:e.clientY};
+    if(pointers.size===2){ const pts=[...pointers.values()]; pinchD=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y); }
+    vp.classList.add('dragging'); });
+  vp.addEventListener('pointermove',e=>{ if(!pointers.has(e.pointerId))return;
+    pointers.set(e.pointerId,{x:e.clientX,y:e.clientY});
+    if(pointers.size===1&&last){ const dx=e.clientX-last.x,dy=e.clientY-last.y;
+      if(!dragMoved&&Math.abs(dx)+Math.abs(dy)>4){ dragMoved=true;
+        try{vp.setPointerCapture(e.pointerId);}catch(_){}}
+      view.tx+=dx; view.ty+=dy; last={x:e.clientX,y:e.clientY}; applyView(); }
+    else if(pointers.size===2){ const pts=[...pointers.values()];
+      const d=Math.hypot(pts[0].x-pts[1].x,pts[0].y-pts[1].y);
+      const mid={x:(pts[0].x+pts[1].x)/2,y:(pts[0].y+pts[1].y)/2};
+      if(pinchD>0)zoomAt(mid.x,mid.y,d/pinchD);
+      pinchD=d;
+      if(!dragMoved){ dragMoved=true; try{vp.setPointerCapture(e.pointerId);}catch(_){}} } });
+  const up=e=>{ pointers.delete(e.pointerId); last=null; pinchD=0; vp.classList.remove('dragging');
+    setTimeout(()=>dragMoved=false,50); };
+  vp.addEventListener('pointerup',up); vp.addEventListener('pointercancel',up);
+  vp.addEventListener('wheel',e=>{ e.preventDefault();
+    if(e.ctrlKey||true){ zoomAt(e.clientX,e.clientY,Math.exp(-e.deltaY*0.0016)); } },{passive:false});
+})();
+function zoomAt(cx,cy,f){ const r=vp.getBoundingClientRect();
+  const x=cx-r.left,y=cy-r.top;
+  const ns=Math.min(2.2,Math.max(0.25,view.s*f)); f=ns/view.s;
+  view.tx=x-(x-view.tx)*f; view.ty=y-(y-view.ty)*f; view.s=ns; applyView(); }
+function centerOn(pid){ const p=layout.pos[pid]; if(!p)return;
+  const r=vp.getBoundingClientRect();
+  view.tx=r.width/2-p.x*view.s; view.ty=r.height/2-(p.y+50)*view.s; applyView(); }
+document.getElementById('zoomIn').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.2);};
+document.getElementById('zoomOut').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.2);};
+document.getElementById('homeBtn').onclick=()=>centerOn(viewing());
+document.getElementById('showall').onclick=resetView;
+
+/* ================= minimap ================= */
+const mm=document.getElementById('minimap');
+function drawMinimap(){ const {bounds,pos}=layout; if(!pos)return;
+  const r=vp.getBoundingClientRect();
+  const needs=bounds.w*view.s>r.width||bounds.h*view.s>r.height;
+  mm.style.display=needs?'block':'none'; if(!needs)return;
+  const f=Math.min(150/bounds.w,100/bounds.h);
+  let h='';
+  for(const pid in pos){ const p=pos[pid];
+    h+=`<div class="dot${pid===viewing()?' me':''}" style="left:${p.x*f-3}px;top:${p.y*f-3}px;"></div>`; }
+  const vx=(-view.tx/view.s)*f, vy=(-view.ty/view.s)*f, vw=(r.width/view.s)*f, vh=(r.height/view.s)*f;
+  h+=`<div class="vp" style="left:${vx}px;top:${vy}px;width:${vw}px;height:${vh}px;"></div>`;
+  mm.innerHTML=h; }
+mm.addEventListener('click',e=>{ const {bounds}=layout; const r=mm.getBoundingClientRect();
+  const f=Math.min(150/bounds.w,100/bounds.h);
+  const wx=(e.clientX-r.left)/f, wy=(e.clientY-r.top)/f;
+  const vr=vp.getBoundingClientRect();
+  view.tx=vr.width/2-wx*view.s; view.ty=vr.height/2-wy*view.s; applyView(); });
+
+/* ================= sheet infra ================= */
+const scrim=document.getElementById('scrim'), sheet=document.getElementById('sheet'),
+      sheetbody=document.getElementById('sheetbody');
+function openSheet(html){ sheetbody.innerHTML=html; scrim.style.display='block';
+  requestAnimationFrame(()=>sheet.classList.add('open')); }
+function closeSheet(){ sheet.classList.remove('open'); scrim.style.display='none'; }
+scrim.onclick=closeSheet;
+let toastT=null;
+function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg;
+  t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+
+/* ================= person sheet ================= */
+const SLOT_LABELS={k:'young kid',t:'teen · young adult',a:'adult'};
+function avatarHtml(per,size){ const photo=per.photos[per.mainPhoto]||per.photos.a||per.photos.t||per.photos.k;
+  const initials=per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+  const st=per.passed?'filter:grayscale(1);opacity:.85;':'';
+  return `<div class="avatar" style="${st}">${photo?`<img src="${photo}">`:initials}
+    ${(!per.passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>`; }
+function partnersCardHtml(pid){
+  const prels=S.rels.filter(r=>r.kind==='pt'&&(r.a===pid||r.b===pid));
+  if(!prels.length)return '';
+  const rows=prels.map(r=>{
+    const other=r.a===pid?r.b:r.a; const st=r.status||'together';
+    if(!person(other))return '';
+    const canRel=canEditPerson(pid)||canEditPerson(other);
+    const ctrl=canRel
+      ?`<select onchange="setPStatus('${pid}','${other}',this.value)" style="background:#fff;border:0;border-radius:8px;padding:3px 6px;font-size:12px;color:var(--ink);">
+          <option value="together" ${st==='together'?'selected':''}>together</option>
+          <option value="separated" ${st==='separated'?'selected':''}>separated</option>
+          <option value="divorced" ${st==='divorced'?'selected':''}>divorced</option></select>
+        ${st!=='together'?`<input value="${esc(r.ended||'')}" placeholder="year" onchange="setPEnded('${pid}','${other}',this.value)"
+          style="width:54px;background:#fff;border:0;border-radius:8px;padding:3px 6px;font-size:12px;">`:''}
+        <button class="link" onclick="unlinkPartner('${pid}','${other}')">unlink</button>`
+      :esc(st+(r.ended?' · '+r.ended:''));
+    return `<div class="nickrow" style="align-items:center;">
+      <span class="nickname">${esc(person(other).name)}</span>
+      <span class="who" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${ctrl}</span></div>`;
+  }).join('');
+  return `<div class="card"><div class="label">Partners</div>${rows}
+    <div class="cap2" style="margin-top:6px;">separated & divorced stay on the tree with a broken line while shared children are shown — "unlink" removes the link entirely (both people stay; children keep both parents)</div></div>`; }
+window.setPStatus=(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
+  r.status=v; if(v==='together')delete r.ended;
+  db.updateRel(r);
+  save(); rebuild(); openPerson(a); toast(v==='together'?'marked together':'marked '+v); };
+window.setPEnded=(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
+  r.ended=v.trim(); db.updateRel(r); save(); rebuild(); };
+window.unlinkPartner=(a,b)=>{
+  if(!confirm('Remove the partner link between '+person(a).name+' and '+person(b).name+'?\n\nBoth people stay in the tree — only the link is removed. Children keep both parents.'))return;
+  S.rels=S.rels.filter(r=>!(r.kind==='pt'&&((r.a===a&&r.b===b)||(r.a===b&&r.b===a))));
+  db.deleteRelPair(a,b);
+  save(); rebuild(); openPerson(a); toast('partner link removed'); };
+function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
+  const per=person(pid); const editable=canEditPerson(pid); const memEditable=canEditMemorial(pid);
+  const dist=branchDistance(pid);
+  const claimedLabel=per.claimedBy
+    ?`✓ claimed — ${esc(S.nuclei[per.claimedBy]?.label||'a nucleus')}`
+    :`unverified · cared for by family within 5 branches`;
+  const nicksHtml=Object.entries(S.nicknames).filter(([v,map])=>map[pid])
+    .map(([v,map])=>({n:map[pid],who:v===viewing()?'you':esc(displayName(v)||person(v)?.name||v)}))
+    .reduce((acc,x)=>{ (acc[x.n]=acc[x.n]||[]).push(x.who); return acc; },{});
+  const akaRows=Object.entries(nicksHtml).map(([n,whos])=>
+    `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.join(', ')}</span></div>`).join('')
+    ||'<div class="cap2">no nicknames yet</div>';
+  const facts=[relationLabel(pid), per.born?('b. '+per.born):null,
+    per.passed?null:(per.country?('lives in '+ (COUNTRIES.find(c=>c[0]===per.country)?.[1]||per.country)+' '+flagEmoji(per.country)):null)]
+    .filter(Boolean).join(' · ');
+  openSheet(`
+    <div class="profile">${avatarHtml(per)}
+      <div><h3>${esc(per.name)}</h3>
+        <div class="cap2">${facts}</div>
+        ${per.passed?`<div class="cap2">${esc(memorialLine(per))}</div>`:''}
+        <div class="cap2" style="color:var(--primary);">${claimedLabel}</div></div></div>
+    ${!per.claimedBy?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="claimPerson('${pid}')">claim — this is me / in my nucleus</button>`:''}
+    ${!per.claimedBy&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="invitePerson('${pid}')">✉ invite ${esc(displayName(pid))} to claim this profile</button>`:''}
+    <div class="card"><div class="label">You call ${per.passed?'them':'them'}</div>
+      <div class="bignick"><input id="mynick" value="${esc(nickFor(pid))}" placeholder="${esc(per.name.split(' ')[0])}">
+        <button class="link" onclick="saveNick('${pid}')">save</button></div></div>
+    <div class="card"><div class="label">Also known as</div>${akaRows}</div>
+    ${partnersCardHtml(pid)}
+    <div class="card"><div class="label">Photos — young kid · teen · adult</div>
+      <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div>
+      <div class="cap2" style="margin-top:8px;">the starred photo is the face shown on the tree</div></div>
+    ${editable?'':`<div class="viewonly">view only — ${per.claimedBy?'claimed by '+esc(S.nuclei[per.claimedBy]?.label||'another nucleus'):'more than 5 branches away ('+(dist===Infinity?'not connected':dist+' branches')+')'}</div>`}
+    <div class="fld"><span class="flabel">Full name</span><input id="f_name" value="${esc(per.name)}" ${editable?'':'disabled'}></div>
+    <div style="display:flex;gap:10px;">
+      <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="f_born" value="${esc(per.born)}" placeholder="year" ${editable?'':'disabled'}></div>
+      <div class="fld" style="flex:2;"><span class="flabel">Living in</span>
+        <select id="f_country" ${editable?'':'disabled'}><option value="">—</option>
+          ${COUNTRIES.map(c=>`<option value="${c[0]}" ${per.country===c[0]?'selected':''}>${flagEmoji(c[0])} ${c[1]}</option>`).join('')}
+        </select></div></div>
+    <button class="link" id="moreBtn" style="display:block;margin:2px 0 10px;">+ more</button>
+    <div id="moreFields" style="display:none;border-left:2px solid var(--accent-soft);padding-left:12px;">
+      <div style="display:flex;gap:10px;">
+        <div class="fld" style="flex:1;"><span class="flabel">Gender</span>
+          <select id="f_gender" ${editable?'':'disabled'}>
+            <option value="">—</option><option value="m" ${per.gender==='m'?'selected':''}>man</option>
+            <option value="f" ${per.gender==='f'?'selected':''}>woman</option></select></div>
+        <div class="fld" style="flex:1;"><span class="flabel">Couple side</span>
+          <select id="f_cpos" ${editable?'':'disabled'}>
+            <option value="">auto</option><option value="left" ${per.couplePos==='left'?'selected':''}>left</option>
+            <option value="right" ${per.couplePos==='right'?'selected':''}>right</option></select></div>
+      </div>
+      <div class="cap2" style="margin:-4px 0 8px 2px;">couples sit husband left · wife right by default — "couple side" lets any couple choose their own arrangement</div>
+      <div class="fld"><span class="flabel">Notes</span><textarea id="f_notes" rows="2" ${editable?'':'disabled'}>${esc(per.notes)}</textarea></div>
+      <div class="fld"><span class="flabel">Passed on — leave empty if still with us</span>
+        <input id="f_passed" value="${esc(per.passed?.date||(per.passed?'':''))}" placeholder="YYYY or YYYY-MM-DD" ${memEditable?'':'disabled'}></div>
+      ${per.passed&&!per.passed.date?'<div class="cap2" style="margin:-6px 0 8px 2px;">marked as passed, date unknown</div>':''}
+      <div class="fld"><span class="flabel">Shown as</span>
+        <select id="f_style" ${memEditable?'':'disabled'}>
+          ${[...new Set(MEM_STYLES.map(s=>s.g))].map(g=>`<optgroup label="${g}">${
+            MEM_STYLES.filter(s=>s.g===g).map(s=>`<option value="${s.id}" ${per.passed?.styleId===s.id?'selected':''}>${s.id==='custom'?'Custom…':esc(s.w||s.wo)}</option>`).join('')
+          }</optgroup>`).join('')}</select></div>
+      <div class="fld" id="customWrap" style="display:${per.passed?.styleId==='custom'?'block':'none'};">
+        <span class="flabel">Custom phrasing (use [date])</span>
+        <input id="f_custom" value="${esc(per.passed?.custom||'')}" ${memEditable?'':'disabled'}></div>
+      ${memEditable&&!editable?'<div class="cap2" style="margin-bottom:8px;">memorial phrasing stays editable by family within 5 branches, even on claimed profiles</div>':''}
+      <div class="cap2" style="margin-bottom:6px;">to mark as passed without a date, pick a phrasing and type "unknown" in the date field</div>
+    </div>
+    <div class="btnrow">
+      <button class="btn secondary" onclick="openAdd('${pid}')">Add relative</button>
+      ${(editable||memEditable)?`<button class="btn primary" onclick="savePerson('${pid}')">Save</button>`:''}
+    </div>`);
+  document.getElementById('moreBtn').onclick=()=>{ const m=document.getElementById('moreFields');
+    const show=m.style.display==='none'; m.style.display=show?'block':'none';
+    document.getElementById('moreBtn').textContent=show?'− more':'+ more'; };
+  if(per.passed)document.getElementById('moreBtn').click();
+  const styleSel=document.getElementById('f_style');
+  if(styleSel)styleSel.onchange=()=>{document.getElementById('customWrap').style.display=styleSel.value==='custom'?'block':'none';};
+}
+function photoSlot(per,slot,editable){ const ph=per.photos[slot];
+  const isMain=per.mainPhoto===slot&&ph;
+  return `<div class="pslot"><div class="ph ${isMain?'main':''}" onclick="${editable?`pickPhoto('${per.id}','${slot}')`:''}" style="${per.passed&&ph?'filter:grayscale(1);':''}">
+    ${ph?`<img src="${ph}">`:'＋'}</div>
+    <div class="pl">${SLOT_LABELS[slot]}</div>
+    ${ph?`<span class="star ${isMain?'on':''}" onclick="${editable?`setMain('${per.id}','${slot}')`:''}">${isMain?'★ on tree':'☆ use on tree'}</span>`:''}</div>`; }
+let photoTarget=null;
+window.pickPhoto=(pid,slot)=>{ photoTarget={pid,slot}; document.getElementById('fileinput').click(); };
+window.setMain=(pid,slot)=>{ person(pid).mainPhoto=slot; db.savePerson(person(pid));
+  save(); rebuild(); openPerson(pid); toast('tree photo updated'); };
+document.getElementById('fileinput').addEventListener('change',e=>{
+  const f=e.target.files[0]; e.target.value=''; if(!f||!photoTarget)return;
+  const img=new Image(); const url=URL.createObjectURL(f);
+  img.onload=()=>{ const max=384; let w=img.width,h=img.height;
+    const sc=Math.min(1,max/Math.max(w,h)); w=Math.round(w*sc);h=Math.round(h*sc);
+    const cv=document.createElement('canvas'); cv.width=w;cv.height=h;
+    cv.getContext('2d').drawImage(img,0,0,w,h);
+    const data=cv.toDataURL('image/jpeg',0.78);
+    const per=person(photoTarget.pid); per.photos[photoTarget.slot]=data;
+    if(!per.photos[per.mainPhoto])per.mainPhoto=photoTarget.slot;
+    db.savePerson(per);
+    save(); rebuild(); openPerson(photoTarget.pid); toast('photo saved'); URL.revokeObjectURL(url); };
+  img.src=url; });
+window.saveNick=(pid)=>{ const v=document.getElementById('mynick').value.trim();
+  if(!S.nicknames[viewing()])S.nicknames[viewing()]={};
+  if(v)S.nicknames[viewing()][pid]=v; else delete S.nicknames[viewing()][pid];
+  db.upsertNick(viewing(),pid,v);
+  save(); rebuild(); toast(v?`saved — you call them ${v}`:'nickname removed'); };
+window.claimPerson=(pid)=>{ person(pid).claimedBy=S.session.nucleusId;
+  db.claim(pid); save(); openPerson(pid);
+  toast('claimed into your nucleus'); };
+window.savePerson=(pid)=>{ const per=person(pid);
+  const editable=canEditPerson(pid), memEditable=canEditMemorial(pid);
+  if(editable){ const n=document.getElementById('f_name').value.trim();
+    if(!n){toast('name is needed');return;}
+    per.name=n; per.born=document.getElementById('f_born').value.trim();
+    per.country=document.getElementById('f_country').value;
+    per.gender=document.getElementById('f_gender').value;
+    per.couplePos=document.getElementById('f_cpos').value;
+    per.notes=document.getElementById('f_notes').value; }
+  if(memEditable){ const d=document.getElementById('f_passed').value.trim().toLowerCase();
+    const styleId=document.getElementById('f_style').value;
+    const custom=document.getElementById('f_custom')?.value||'';
+    if(d==='unknown'){ per.passed={date:'',styleId,custom}; }
+    else if(d){ if(!/^\d{4}(-\d{2}-\d{2})?$/.test(d)){toast('date should be YYYY or YYYY-MM-DD');return;}
+      per.passed={date:d,styleId,custom}; }
+    else if(per.passed&&!per.passed.date&&d===''){ /* keep passed-no-date if it was set */ }
+    else per.passed=null; }
+  if(editable)db.savePerson(per);
+  if(memEditable)db.saveMemorial(per);
+  save(); rebuild(); closeSheet(); toast('saved — '+per.name); };
+
+/* ================= add person ================= */
+window.openAdd=(anchor)=>{ const a=person(anchor);
+  const canParent=parentsOf(anchor).length<2;
+  const canSibling=parentsOf(anchor).length>0;
+  openSheet(`
+    <h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Add a person</h3>
+    <div class="fld"><span class="flabel">Full name</span><input id="a_name" placeholder="full name"></div>
+    <div style="display:flex;gap:10px;">
+      <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="a_born" placeholder="year"></div>
+      <div class="fld" style="flex:1;"><span class="flabel">Gender</span>
+        <select id="a_gender"><option value="">—</option><option value="m">man</option><option value="f">woman</option></select></div>
+      <div class="fld" style="flex:2;"><span class="flabel">Living in</span>
+        <select id="a_country"><option value="">—</option>
+        ${COUNTRIES.map(c=>`<option value="${c[0]}">${flagEmoji(c[0])} ${c[1]}</option>`).join('')}</select></div></div>
+    <div class="grouphdr">Connected as</div>
+    ${[['parent','↑','Parent of '+esc(displayName(anchor)),canParent,'adds a generation above'],
+       ['partner','♥','Partner of '+esc(displayName(anchor)),true,''],
+       ['child','↓','Child of '+esc(displayName(anchor))+(partnerOf(anchor)?' & '+esc(displayName(partnerOf(anchor))):''),true,''],
+       ...(partnerOf(anchor)?[['childsolo','↓','Child of '+esc(displayName(anchor))+' only',true,'from another relationship — hangs from them alone']]:[]),
+       ['sibling','↔','Sibling of '+esc(displayName(anchor)),canSibling,canSibling?'shares their parents':'add a parent first']]
+      .map(([k,ic,lb,ok,sub])=>`<button class="choice" data-rel="${k}" ${ok?'':'disabled style="opacity:.45;cursor:default;"'}>
+        <span class="itile">${ic}</span><span>${lb}${sub?`<span class="sub">${sub}</span>`:''}</span></button>`).join('')}
+    <div class="btnrow"><button class="btn primary" id="a_save">Save</button></div>
+    <p class="cap2" style="margin-top:10px;">saved as unverified — anyone within 5 branches can care for this profile until it's claimed.</p>`);
+  let rel='partner';
+  sheetbody.querySelectorAll('.choice[data-rel]').forEach(b=>{
+    if(b.dataset.rel==='partner')b.style.outline='2px solid var(--accent)';
+    b.onclick=()=>{ if(b.disabled)return; rel=b.dataset.rel;
+      sheetbody.querySelectorAll('.choice').forEach(x=>x.style.outline='');
+      b.style.outline='2px solid var(--accent)'; }; });
+  document.getElementById('a_save').onclick=()=>{
+    const name=document.getElementById('a_name').value.trim();
+    if(!name){toast('name is needed');return;}
+    const id=(MODE==='cloud'&&crypto.randomUUID)?crypto.randomUUID():'p'+Date.now().toString(36);
+    S.persons[id]={id,name,gender:document.getElementById('a_gender').value,couplePos:'',
+      born:document.getElementById('a_born').value.trim(),
+      country:document.getElementById('a_country').value,claimedBy:null,notes:'',passed:null,photos:{},mainPhoto:'a'};
+    const newRels=[];
+    if(rel==='parent'){ newRels.push({kind:'pc',a:id,b:anchor});
+      const other=parentsOf(anchor).find(x=>x!==id);
+      if(other)newRels.push({kind:'pt',a:id,b:other}); }
+    else if(rel==='partner')newRels.push({kind:'pt',a:anchor,b:id});
+    else if(rel==='child'){ newRels.push({kind:'pc',a:anchor,b:id});
+      const pt=partnerOf(anchor); if(pt)newRels.push({kind:'pc',a:pt,b:id}); }
+    else if(rel==='childsolo')newRels.push({kind:'pc',a:anchor,b:id});
+    else if(rel==='sibling')parentsOf(anchor).forEach(p=>newRels.push({kind:'pc',a:p,b:id}));
+    newRels.forEach(r=>S.rels.push(r));
+    (async()=>{ await db.insertPerson(S.persons[id]);
+      for(const r of newRels)await db.insertRel(r); })();
+    save(); rebuild(); closeSheet(); toast('added — '+name+' (unverified)'); };
+};
+
+/* ================= own profile ================= */
+function openSelf(){ const per=person(viewing());
+  const nuc=S.nuclei[S.session.nucleusId];
+  const members=nucleusMembers(S.session.nucleusId).filter(p=>p!==viewing()).map(displayName).join(', ')||'just you';
+  const calls=Object.entries(S.nicknames).filter(([v,map])=>v!==viewing()&&map[viewing()])
+    .reduce((acc,[v,map])=>{ const n=map[viewing()]; (acc[n]=acc[n]||[]).push(displayName(v)); return acc; },{});
+  const rows=Object.entries(calls).map(([n,whos])=>
+    `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.map(esc).join(', ')}</span></div>`).join('')
+    ||'<div class="cap2">nobody has set a nickname for you yet</div>';
+  const editable=canEditPerson(viewing());
+  openSheet(`
+    <div class="profile">${avatarHtml(per)}
+      <div><h3>${esc(per.name)}</h3><div class="cap2">that's you 🐻</div></div></div>
+    <div class="card"><div class="label">You go by</div>
+      <div class="bignick"><input id="mynick" value="${esc(nickFor(viewing()))}" placeholder="${esc(per.name.split(' ')[0])}">
+        <button class="link" onclick="saveNick('${viewing()}')">save</button></div>
+      <div class="cap2" style="margin-top:4px;">the name shown big on your own node</div></div>
+    <div class="card"><div class="label">What people call you</div>${rows}</div>
+    ${partnersCardHtml(viewing())}
+    <div class="card"><div class="label">Your nucleus</div>
+      <div class="nickrow"><span class="nickname">${esc(members)}</span><span class="who">shared login · always in view</span></div>
+      <div class="nickrow"><span class="nickname" style="color:var(--primary);" id="tn_show">${esc(nuc.treeName)}</span>
+        <button class="link" onclick="renameTree()">✎ rename</button></div>
+      ${isSuper()?`<div class="nickrow"><span class="nickname">Invite family</span>
+        <button class="link" onclick="makeInvite()">✉ create a code</button></div>`:''}</div>
+    ${isSuper()?`<div class="card"><div class="label">Super users · up to 3</div>
+      ${Object.values(S.nuclei).map(n=>`<div class="nickrow"><span class="nickname">${esc(n.label)}</span>
+        <span class="who">${n.isSuper
+          ?`⭐ super${n.id!==ME.nucleusId?` · <button class="link" onclick="makeSuper('${n.id}',false)">remove</button>`:''}`
+          :`<button class="link" onclick="makeSuper('${n.id}',true)">make super</button>`}</span></div>`).join('')}
+      <div class="cap2" style="margin-top:6px;">super users create invites and can send personal claim-links from any unclaimed profile</div></div>`:''}
+    <div class="card"><div class="label">Photos — young kid · teen · adult</div>
+      <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div></div>
+    <div class="fld"><span class="flabel">Full name</span><input id="f_name" value="${esc(per.name)}"></div>
+    <div style="display:flex;gap:10px;">
+      <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="f_born" value="${esc(per.born)}"></div>
+      <div class="fld" style="flex:2;"><span class="flabel">Living in</span>
+        <select id="f_country"><option value="">—</option>
+        ${COUNTRIES.map(c=>`<option value="${c[0]}" ${per.country===c[0]?'selected':''}>${flagEmoji(c[0])} ${c[1]}</option>`).join('')}</select></div></div>
+    <div style="display:flex;gap:10px;">
+      <div class="fld" style="flex:1;"><span class="flabel">Gender</span>
+        <select id="f_gender"><option value="">—</option>
+          <option value="m" ${per.gender==='m'?'selected':''}>man</option>
+          <option value="f" ${per.gender==='f'?'selected':''}>woman</option></select></div>
+      <div class="fld" style="flex:1;"><span class="flabel">Couple side</span>
+        <select id="f_cpos"><option value="">auto</option>
+          <option value="left" ${per.couplePos==='left'?'selected':''}>left</option>
+          <option value="right" ${per.couplePos==='right'?'selected':''}>right</option></select></div></div>
+    <div class="btnrow">
+      <button class="btn secondary" onclick="openAdd('${viewing()}')">Add relative</button>
+      <button class="btn primary" onclick="saveSelf()">Save</button></div>
+    <p class="cap2" style="margin-top:10px;">nicknames are set by each person for themselves to use — to change what you call someone, edit it on their profile.</p>
+    <button class="link" onclick="signOut()" style="display:block;margin:10px auto 0;">sign out</button>`); }
+window.saveSelf=()=>{ const per=person(viewing());
+  const n=document.getElementById('f_name').value.trim(); if(!n){toast('name is needed');return;}
+  per.name=n; per.born=document.getElementById('f_born').value.trim();
+  per.country=document.getElementById('f_country').value;
+  per.gender=document.getElementById('f_gender').value;
+  per.couplePos=document.getElementById('f_cpos').value;
+  db.savePerson(per);
+  save(); rebuild(); closeSheet(); toast('saved'); };
+window.renameTree=()=>{ const nuc=S.nuclei[S.session.nucleusId];
+  const v=prompt('your name for this tree — only your nucleus sees it',nuc.treeName);
+  if(v&&v.trim()){ nuc.treeName=v.trim(); db.renameNucleus(nuc.treeName);
+    save(); document.getElementById('treename').textContent=nuc.treeName;
+    const el=document.getElementById('tn_show'); if(el)el.textContent=nuc.treeName; toast('renamed — '+nuc.treeName); } };
+function inviteDialog(code,forName){
+  const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
+  const mail='mailto:?subject='+encodeURIComponent('Join our family tree 🐻')
+    +'&body='+encodeURIComponent((forName?`This is a personal invite for ${forName}.\n\n`:'')
+    +`Open this link, create an account, and you'll land in your place on the family tree:\n\n${link}\n\nInvite code (if asked): ${code}`);
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Invite${forName?' — '+esc(forName):''}</h3>
+    <div class="card"><div class="label">Share this link</div>
+      <div style="font-size:12px;line-height:17px;word-break:break-all;color:var(--ink-soft);">${esc(link)}</div></div>
+    <div class="card"><div class="label">Or the code</div>
+      <div class="bignick"><span class="v" style="font-size:20px;">${esc(code)}</span></div></div>
+    <div class="btnrow">
+      <button class="btn secondary" id="inv_mail">send by email</button>
+      <button class="btn primary" id="inv_copy">copy link</button></div>
+    <p class="cap2" style="margin-top:10px;">valid 14 days${forName?` · single use — whoever opens it claims ${esc(forName)}'s profile`:' · anyone with it can join the tree'}</p>`);
+  document.getElementById('inv_copy').onclick=async()=>{
+    try{ await navigator.clipboard.writeText(link); toast('link copied'); }
+    catch(e){ prompt('copy the link:',link); } };
+  document.getElementById('inv_mail').onclick=()=>{ location.href=mail; }; }
+window.makeInvite=async()=>{ const code=await db.invite(); if(code)inviteDialog(code,null); };
+window.invitePerson=async(pid)=>{
+  const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId,person_id:pid})
+    .select('code').single();
+  if(error){ dbErr(error); return; }
+  inviteDialog(data.code,person(pid).name); };
+window.makeSuper=async(nid,flag)=>{
+  const {error}=await sb.rpc('set_super',{target:nid,flag});
+  if(error){ toast((error.message||'failed').toLowerCase()); return; }
+  S.nuclei[nid].isSuper=flag; openSelf(); toast(flag?'made super user ⭐':'super user removed'); };
+window.signOut=async()=>{ if(MODE==='cloud'){ try{ localStorage.removeItem('bft.prefs.'+ME.userId);
+    await sb.auth.signOut(); }catch(e){} }
+  else { S.session=null; save(); }
+  location.reload(); };
+document.getElementById('renameBtn').onclick=()=>renameTree();
+
+/* ================= search ================= */
+const searchEl=document.getElementById('search'), resultsEl=document.getElementById('results');
+searchEl.addEventListener('input',()=>{ const q=searchEl.value.trim().toLowerCase();
+  if(!q){resultsEl.style.display='none';return;}
+  const hits=Object.values(S.persons).filter(p=>
+    p.name.toLowerCase().includes(q)||(nickFor(p.id)||'').toLowerCase().includes(q)).slice(0,8);
+  resultsEl.innerHTML=hits.map(p=>`<button data-pid="${p.id}">
+    <span class="rn">${esc(nickFor(p.id)||p.name.split(' ')[0])}</span>
+    <span class="rf">${esc(p.name)}</span></button>`).join('')||'<div class="cap2" style="padding:8px 12px;">no match</div>';
+  resultsEl.style.display='block'; });
+resultsEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
+  const pid=b.dataset.pid; resultsEl.style.display='none'; searchEl.value='';
+  revealPath(pid); centerOn(pid); openPerson(pid); });
+document.addEventListener('click',e=>{ if(!e.target.closest('#searchwrap'))resultsEl.style.display='none'; });
+function revealPath(target){ let vis=computeVisible(); if(vis.has(target))return;
+  // BFS path from viewer to target over the full graph
+  const prev={}; const seen=new Set([viewing()]); let front=[viewing()];
+  outer: while(front.length){ const nxt=[];
+    for(const f of front) for(const n of neighborsOf(f)) if(!seen.has(n)){
+      seen.add(n); prev[n]=f; nxt.push(n); if(n===target)break outer; }
+    front=nxt; }
+  if(!(target in prev))return;
+  const path=[target]; let c=target; while(prev[c]){c=prev[c];path.unshift(c);}
+  for(let i=0;i<path.length-1;i++){ const A=path[i],B=path[i+1];
+    vis=computeVisible(); if(vis.has(B))continue;
+    if(parentsOf(A).includes(B)||siblingsOf(A).includes(B))addExpansionSilent('side',A);
+    else addExpansionSilent('family',A); }
+  // enforce the one-side-at-a-time rule on the final chain
+  computeVisible();
+  const keep=new Set(defaultExpansions().map(expKey).filter(k=>k.startsWith('family:')));
+  chainKeys(target).forEach(k=>keep.add(k));
+  S.active=S.active.filter(k=>keep.has(k));
+  [...keep].forEach(k=>{if(!S.active.includes(k)&&S.history.find(e=>expKey(e)===k))S.active.push(k);});
+  save(); rebuild(); updateFocusBar(displayName(target)); }
+function addExpansionSilent(kind,pid){ computeVisible(); const key=kind+':'+pid;
+  let e=S.history.find(x=>expKey(x)===key);
+  if(!e){e={kind,pid,from:revealedBy.get(pid)||'nucleus'};S.history.push(e);}
+  if(!S.active.includes(key))S.active.push(key); }
+
+/* ================= login / auth / onboarding ================= */
+function loginCard(inner){ const el=document.getElementById('login');
+  el.style.display='flex'; document.getElementById('app').style.display='none';
+  el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`; return el; }
+function renderLogin(){
+  const el=loginCard(`<h1>Bear Family Tree</h1>
+    <div class="cap">${PENDING_INVITE?'you\'ve been invited 🐻 — create an account (or sign in) to take your place':'sign in — one login per household, shared or personal'}</div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" type="email" autocomplete="email"></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" type="password" autocomplete="current-password"></div>
+    <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
+    <button class="btn primary" style="width:100%;" id="au_in">Sign in</button>
+    <button class="btn secondary" style="width:100%;margin-top:8px;" id="au_up">Create account</button>
+    ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
+    <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
+  const msg=t=>{document.getElementById('au_msg').textContent=t;};
+  const creds=()=>({email:document.getElementById('au_email').value.trim(),
+                    password:document.getElementById('au_pass').value});
+  document.getElementById('au_in').onclick=async()=>{ if(!sb)return;
+    const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
+    msg('signing in…');
+    const {error}=await sb.auth.signInWithPassword(c);
+    if(error)msg((error.message||'sign-in failed').toLowerCase()); else enterCloud(); };
+  document.getElementById('au_up').onclick=async()=>{ if(!sb)return;
+    const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
+    if(c.password.length<6){msg('password needs at least 6 characters');return;}
+    msg('creating account…');
+    const {data,error}=await sb.auth.signUp(c);
+    if(error)msg((error.message||'sign-up failed').toLowerCase());
+    else if(!data.session)msg('account created — check your email to confirm, then sign in');
+    else enterCloud(); };
+  document.getElementById('au_demo').onclick=()=>{ MODE='demo'; load();
+    if(S.session)enterApp(); else renderDemoLogin(); }; }
+function renderDemoLogin(){ const el=document.getElementById('login');
+  const houses=Object.values(S.nuclei).map(n=>{
+    const mem=nucleusMembers(n.id);
+    return `<button class="choice" data-n="${n.id}"><span class="itile">${(n.label[0]||'?').toUpperCase()}</span>
+      <span>${esc(n.label)}<span class="sub">${mem.map(m=>person(m).name.split(' ')[0]).join(', ')||'no members yet'} · "${esc(n.treeName)}"</span></span></button>`; }).join('');
+  loginCard(`<h1>Local demo</h1>
+    <div class="cap">pick a household — data stays in this browser only</div>
+    ${houses}`);
+  el.querySelectorAll('.choice').forEach(b=>b.onclick=()=>{
+    const nid=b.dataset.n; const mems=nucleusMembers(nid);
+    if(!mems.length){toast('that household has no members yet');return;}
+    if(mems.length===1)startSession(nid,mems[0]);
+    else pickProfile(nid,mems); }); }
+async function enterCloud(){ MODE='cloud'; S=blankState();
+  loginCard('<h1>Bear Family Tree</h1><div class="cap">loading your tree…</div>');
+  try{ const {data:{user}}=await sb.auth.getUser(); ME.userId=user.id; }
+  catch(e){ renderLogin(); return; }
+  let ok; try{ ok=await cloudFetchAll(); }
+  catch(e){ loginCard(`<h1>hmm</h1><div class="cap">couldn't load your tree — ${esc((e&&e.message)||e)}</div>
+    <button class="btn secondary" style="width:100%;" onclick="location.reload()">try again</button>`); return; }
+  if(!ok){ if(PENDING_INVITE){ renderJoinInvited(PENDING_INVITE); return; }
+    renderOnboarding(); return; }
+  if(PENDING_INVITE){ try{localStorage.removeItem('bft.pendingInvite');}catch(e){}
+    PENDING_INVITE=null; toast('invite ignored — you already have a place in this tree'); }
+  const members=nucleusMembers(ME.nucleusId);
+  if(!members.length){ renderWhoAreYou(); return; }
+  let prefs=null; try{ prefs=JSON.parse(localStorage.getItem('bft.prefs.'+ME.userId)); }catch(e){}
+  if(prefs&&prefs.session&&members.includes(prefs.session.viewingAs)){
+    S.session={nucleusId:ME.nucleusId,viewingAs:prefs.session.viewingAs};
+    S.history=prefs.history||[]; S.active=prefs.active||[];
+    ensureDefaults(); enterApp(); }
+  else if(members.length===1)startSession(ME.nucleusId,members[0]);
+  else pickProfile(ME.nucleusId,members); }
+function renderOnboarding(){
+  loginCard(`<h1>Welcome 🐻</h1>
+    <div class="cap">set up your place in the family</div>
+    <button class="choice" id="ob_new"><span class="itile">🌱</span>
+      <span>Start a new family tree<span class="sub">you're the first one here</span></span></button>
+    <button class="choice" id="ob_join"><span class="itile">✉</span>
+      <span>Join with an invite code<span class="sub">someone in the family sent you a code</span></span></button>
+    <button class="link" id="ob_out" style="margin-top:12px;">sign out</button>`);
+  document.getElementById('ob_out').onclick=signOut;
+  document.getElementById('ob_new').onclick=()=>{
+    loginCard(`<h1>Start your tree</h1>
+      <div class="fld" style="text-align:left;"><span class="flabel">Your full name</span><input id="ob_name"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Gender</span>
+        <select id="ob_gender"><option value="">—</option><option value="m">man</option><option value="f">woman</option></select></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Household name</span><input id="ob_label" placeholder="e.g. Aizat & Sarah's household"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ob_tree" placeholder="e.g. BearFamily"></div>
+      <div id="ob_msg" class="cap" style="min-height:18px;"></div>
+      <button class="btn primary" style="width:100%;" id="ob_go">Create</button>`);
+    document.getElementById('ob_go').onclick=async()=>{
+      const name=document.getElementById('ob_name').value.trim();
+      const label=document.getElementById('ob_label').value.trim()||'our household';
+      const tn=document.getElementById('ob_tree').value.trim()||'our family';
+      if(!name){document.getElementById('ob_msg').textContent='your name is needed';return;}
+      document.getElementById('ob_msg').textContent='creating…';
+      const {error}=await sb.rpc('create_tree',{nucleus_label:label,tree_nm:tn});
+      if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
+      await cloudFetchAll();
+      const id=crypto.randomUUID();
+      const {error:e2}=await sb.from('person').insert({id,tree_id:ME.treeId,full_name:name,
+        gender:document.getElementById('ob_gender').value||null,claimed_by:ME.nucleusId});
+      if(e2){document.getElementById('ob_msg').textContent=(e2.message||'failed').toLowerCase();return;}
+      await cloudFetchAll(); startSession(ME.nucleusId,id); }; };
+  document.getElementById('ob_join').onclick=()=>{
+    loginCard(`<h1>Join the family</h1>
+      <div class="fld" style="text-align:left;"><span class="flabel">Invite code</span><input id="ob_code"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Your household name</span><input id="ob_label" placeholder="e.g. Kak Ina"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ob_tree" placeholder="e.g. my family"></div>
+      <div id="ob_msg" class="cap" style="min-height:18px;"></div>
+      <button class="btn primary" style="width:100%;" id="ob_go">Join</button>`);
+    document.getElementById('ob_go').onclick=async()=>{
+      const code=document.getElementById('ob_code').value.trim();
+      const label=document.getElementById('ob_label').value.trim()||'our household';
+      const tn=document.getElementById('ob_tree').value.trim()||'our family';
+      if(!code){document.getElementById('ob_msg').textContent='the invite code is needed';return;}
+      document.getElementById('ob_msg').textContent='joining…';
+      let {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
+      if(error&&/find the function/i.test(error.message||'')){ // pre-upgrade fallback
+        ({error}=await sb.rpc('join_tree',{invite_code:code,nucleus_label:label,tree_nm:tn})); data=null; }
+      if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
+      await cloudFetchAll();
+      if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);
+      else renderWhoAreYou(); }; }; }
+function renderJoinInvited(code){
+  loginCard(`<h1>Welcome 🐻</h1>
+    <div class="cap">you've been invited — name your household and you'll land in your place</div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Your household name</span><input id="ji_label" placeholder="e.g. Kak Ina · or Adam & Hana's household"></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ji_tree" placeholder="e.g. my family"></div>
+    <div id="ji_msg" class="cap" style="min-height:18px;"></div>
+    <button class="btn primary" style="width:100%;" id="ji_go">Take my place</button>
+    <button class="link" id="ji_out" style="margin-top:12px;">sign out</button>`);
+  document.getElementById('ji_out').onclick=signOut;
+  document.getElementById('ji_go').onclick=async()=>{
+    const label=document.getElementById('ji_label').value.trim()||'our household';
+    const tn=document.getElementById('ji_tree').value.trim()||'our family';
+    document.getElementById('ji_msg').textContent='joining…';
+    const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
+    if(error){ document.getElementById('ji_msg').textContent=(error.message||'failed').toLowerCase(); return; }
+    try{localStorage.removeItem('bft.pendingInvite');}catch(e){} PENDING_INVITE=null;
+    await cloudFetchAll();
+    if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);
+    else renderWhoAreYou(); }; }
+function renderWhoAreYou(){
+  const unclaimed=Object.values(S.persons).filter(p=>!p.claimedBy);
+  loginCard(`<h1>Who are you?</h1>
+    <div class="cap">claim yourself if family already added you — or add yourself fresh</div>
+    <div style="max-height:220px;overflow:auto;">
+      ${unclaimed.map(p=>`<button class="choice" data-claim="${p.id}"><span class="itile">${esc(p.name.split(' ').map(w=>w[0]).slice(0,2).join(''))}</span>
+        <span>${esc(p.name)}<span class="sub">${p.born?('b. '+esc(p.born)):'unclaimed'}</span></span></button>`).join('')||'<div class="cap">nobody unclaimed yet</div>'}
+    </div>
+    <div class="fld" style="text-align:left;margin-top:10px;"><span class="flabel">or add yourself — full name</span><input id="wa_name"></div>
+    <button class="btn primary" style="width:100%;" id="wa_new">Add me</button>`);
+  document.querySelectorAll('[data-claim]').forEach(b=>b.onclick=async()=>{
+    const pid=b.dataset.claim;
+    const {error}=await sb.rpc('claim_person',{p:pid});
+    if(error){toast((error.message||'claim failed').toLowerCase());return;}
+    S.persons[pid].claimedBy=ME.nucleusId; startSession(ME.nucleusId,pid); });
+  document.getElementById('wa_new').onclick=async()=>{
+    const name=document.getElementById('wa_name').value.trim();
+    if(!name){toast('your name is needed');return;}
+    const id=crypto.randomUUID();
+    const {error}=await sb.from('person').insert({id,tree_id:ME.treeId,full_name:name,claimed_by:ME.nucleusId});
+    if(error){toast((error.message||'failed').toLowerCase());return;}
+    await cloudFetchAll(); startSession(ME.nucleusId,id); }; }
+function pickProfile(nid,mems){ const el=document.getElementById('login');
+  el.querySelector('.card').innerHTML=`<div class="bear">🐻</div>
+    <h1>Who's looking?</h1><div class="cap">nicknames are personal — pick yourself</div>
+    ${mems.map(m=>`<button class="choice" data-p="${m}"><span class="itile">${person(m).name.split(' ').map(w=>w[0]).slice(0,2).join('')}</span>
+      <span>${esc(person(m).name)}</span></button>`).join('')}`;
+  el.querySelectorAll('.choice').forEach(b=>b.onclick=()=>startSession(nid,b.dataset.p)); }
+function startSession(nid,pid){ S.session={nucleusId:nid,viewingAs:pid};
+  S.history=[];S.active=[]; ensureDefaults(); save(); enterApp(); }
+document.getElementById('viewingBtn').onclick=()=>{
+  const mems=nucleusMembers(S.session.nucleusId);
+  if(mems.length<2){toast('only you on this login');return;}
+  const i=(mems.indexOf(viewing())+1)%mems.length;
+  S.session.viewingAs=mems[i]; S.history=[];S.active=[]; ensureDefaults(); save();
+  document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
+  closeSheet(); rebuild(); centerOn(viewing()); lastFocusLabel=''; updateFocusBar();
+  toast('viewing as '+person(viewing()).name.split(' ')[0]); };
+
+/* ================= boot ================= */
+function enterApp(){
+  document.getElementById('login').style.display='none';
+  document.getElementById('app').style.display='flex';
+  document.getElementById('treename').textContent=S.nuclei[S.session.nucleusId].treeName;
+  document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
+  rebuild(); view.s=1; centerOn(viewing()); updateFocusBar();
+  if(MODE==='cloud')subscribeRealtime(); }
+async function boot(){ S=blankState();
+  renderLogin(); // always paint immediately — never gate first paint on the network
+  if(sb){ try{ const {data}=await Promise.race([ sb.auth.getSession(),
+      new Promise(res=>setTimeout(()=>res({data:{session:null}}),4000)) ]);
+    if(data&&data.session&&MODE!=='demo')enterCloud(); }catch(e){} } }
+boot();
+window.addEventListener('resize',()=>drawMinimap());
+</script>
+</body>
+</html>
