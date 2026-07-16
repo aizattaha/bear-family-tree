@@ -1,4 +1,0 @@
-# Bear Family Tree — Netlify config
-# The whole app is app/index.html; no build step.
-[build]
-  publish = "app"
