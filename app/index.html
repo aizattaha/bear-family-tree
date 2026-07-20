@@ -321,6 +321,7 @@ function save(){
     // per-device prefs (who's viewing, which branches are open) persist here
     try{ localStorage.setItem('bft.prefs.'+ME.userId,
       JSON.stringify({session:S.session,history:S.history,active:S.active})); }catch(e){}
+    stampSeen();
     return; }
   try{ localStorage.setItem(LS_KEY,JSON.stringify(S)); }catch(e){ toast('storage full — photo too large?'); } }
 
@@ -402,7 +403,7 @@ const db={
   async invite(){ const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId})
     .select('code').single(); if(error){dbErr(error);return null;} return data.code; } };
 let refetchT=null;
-function scheduleRefetch(){ if(MODE!=='cloud')return; clearTimeout(refetchT);
+function scheduleRefetch(){ if(MODE!=='cloud')return; stampSeen(); clearTimeout(refetchT);
   refetchT=setTimeout(async()=>{ try{ await cloudFetchAll(); rebuild(); }catch(e){} },1200); }
 window.addEventListener('focus',scheduleRefetch);
 function subscribeRealtime(){ if(!sb||MODE!=='cloud')return;
@@ -1383,9 +1384,11 @@ function renderLogin(signup,prefillEmail){
     ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`
      :PENDING_NEWTREE?`<div style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to create your own family tree! 🐻</div>`:''}
     <div class="cap">${signup?'create your account — it takes ten seconds':'sign in — one login per household, shared or personal'}</div>
-    <form id="au_form" method="post" action="#" autocomplete="on">
-      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" name="email" type="email" autocomplete="username" inputmode="email" value="${esc(prefillEmail||'')}"></div>
-      <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" name="password" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
+    <form id="au_form" name="${signup?'register':'login'}" method="post" action="#" autocomplete="on">
+      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(prefillEmail||'')}"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Password</span>${signup
+        ?'<input id="au_newpass" name="new-password" type="password" autocomplete="new-password">'
+        :'<input id="au_pass" name="password" type="password" autocomplete="current-password">'}</div>
       <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
       <button type="submit" class="btn primary" style="width:100%;" id="${signup?'au_up':'au_in'}">${signup?'Create account':'Sign in'}</button>
     </form>
@@ -1394,7 +1397,7 @@ function renderLogin(signup,prefillEmail){
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
   const msg=t=>{document.getElementById('au_msg').textContent=t;};
   const creds=()=>({email:document.getElementById('au_email').value.trim(),
-                    password:document.getElementById('au_pass').value});
+                    password:(document.getElementById(signup?'au_newpass':'au_pass')||{}).value||''});
   const doIn=async()=>{ if(!sb)return;
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     msg('signing in…');
@@ -1575,13 +1578,23 @@ function enterApp(){
   document.getElementById('treename').textContent=S.nuclei[S.session.nucleusId].treeName;
   document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
   rebuild(); view.s=1; centerOn(viewing()); updateFocusBar();
-  if(MODE==='cloud')subscribeRealtime();
+  if(MODE==='cloud'){ subscribeRealtime(); stampSeen(); }
   try{ if(!localStorage.getItem(tutKey()))setTimeout(()=>openTutorial(true),600); }catch(e){} }
+const IDLE_MS=3*24*60*60*1000; // 3 quiet days → signed out
+function stampSeen(){ if(MODE==='cloud'&&ME.userId)
+  try{ localStorage.setItem('bft.lastSeen.'+ME.userId,String(Date.now())); }catch(e){} }
 async function boot(){ S=blankState();
   renderLogin(); // always paint immediately — never gate first paint on the network
   if(sb){ try{ const {data}=await Promise.race([ sb.auth.getSession(),
       new Promise(res=>setTimeout(()=>res({data:{session:null}}),4000)) ]);
-    if(data&&data.session&&MODE!=='demo')enterCloud(); }catch(e){} } }
+    if(data&&data.session&&MODE!=='demo'){
+      const uid=data.session.user&&data.session.user.id;
+      let last=0; try{ last=parseInt(localStorage.getItem('bft.lastSeen.'+uid)||'0',10); }catch(e){}
+      if(uid&&last&&Date.now()-last>IDLE_MS){ // away too long — sign out
+        try{ localStorage.removeItem('bft.lastSeen.'+uid); await sb.auth.signOut(); }catch(e){}
+        renderLogin(); toast("signed out — it's been a few quiet days 🐻");
+        return; }
+      enterCloud(); } }catch(e){} } }
 boot();
 window.addEventListener('resize',()=>drawMinimap());
 </script>
