@@ -1377,22 +1377,19 @@ function loginCard(inner){ const el=document.getElementById('login');
   el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`;
   el.querySelectorAll('input:not([autocomplete])').forEach(i=>i.setAttribute('autocomplete','off'));
   return el; }
-function renderLogin(signup){
+function renderLogin(signup,prefillEmail){
   if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
   loginCard(`<h1>Bear Family Tree</h1>
     ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`
      :PENDING_NEWTREE?`<div style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to create your own family tree! 🐻</div>`:''}
     <div class="cap">${signup?'create your account — it takes ten seconds':'sign in — one login per household, shared or personal'}</div>
     <form id="au_form" method="post" action="#" autocomplete="on">
-      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" name="email" type="email" autocomplete="username" inputmode="email"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" name="email" type="email" autocomplete="username" inputmode="email" value="${esc(prefillEmail||'')}"></div>
       <div class="fld" style="text-align:left;"><span class="flabel">Password</span><input id="au_pass" name="password" type="password" autocomplete="${signup?'new-password':'current-password'}"></div>
       <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
-      ${signup
-        ?`<button type="submit" class="btn primary" style="width:100%;" id="au_up">Create account</button>`
-        :`<button type="submit" class="btn primary" style="width:100%;" id="au_in">Sign in</button>
-           <button type="button" class="btn secondary" style="width:100%;margin-top:8px;" id="au_up">Create account</button>`}
+      <button type="submit" class="btn primary" style="width:100%;" id="${signup?'au_up':'au_in'}">${signup?'Create account':'Sign in'}</button>
     </form>
-    ${signup?'<button class="link" id="au_sw" style="margin-top:12px;">already have an account? sign in</button>':''}
+    <button class="link" id="au_sw" style="margin-top:12px;">${signup?'already have an account? sign in':'new here? create an account'}</button>
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
   const msg=t=>{document.getElementById('au_msg').textContent=t;};
@@ -1411,14 +1408,14 @@ function renderLogin(signup){
     if(error)msg((error.message||'sign-up failed').toLowerCase());
     else if(!data.session)msg('account created — check your email to confirm, then sign in');
     else enterCloud(); };
-  // a real <form> submit is what makes password managers save & offer credentials
+  // a real <form> with ONE purpose per view: Safari autofills saved
+  // credentials on sign-in, and suggests strong passwords only on sign-up
   document.getElementById('au_form').onsubmit=e=>{ e.preventDefault(); (signup?doUp:doIn)(); };
-  if(!signup)document.getElementById('au_up').onclick=doUp; // type=button in sign-in view
   if(PENDING_INVITE&&sb){ // personalise: "Kak Yana, you're invited to join Bear Family Tree!"
     sb.rpc('invite_preview',{invite_code:PENDING_INVITE}).then(({data})=>{
       const b=document.getElementById('inv_banner');
       if(b&&data)b.textContent=data+", you're invited to join Bear Family Tree! 🐻"; }).catch(()=>{}); }
-  const sw=document.getElementById('au_sw'); if(sw)sw.onclick=()=>renderLogin(false);
+  document.getElementById('au_sw').onclick=()=>renderLogin(!signup,creds().email);
   document.getElementById('au_demo').onclick=()=>{ MODE='demo'; load();
     if(S.session)enterApp(); else renderDemoLogin(); }; }
 function renderDemoLogin(){ const el=document.getElementById('login');
