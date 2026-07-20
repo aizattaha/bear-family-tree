@@ -34,7 +34,7 @@ The login screen lists demo **households (nuclei)** — pick *Aizat & Sarah's ho
 | **Stable positions** | expanding a side never reshuffles what's already on screen — new people slot in around the existing layout, and the node you expanded stays put under your cursor. |
 | **Children card & fixing links** | every sheet lists the person's children. If their partner has children not linked to them (added before the marriage was), each shows **"link as X's child"** — one tap attaches the parent. |
 | **Deleting someone** | open their sheet → **"remove [name] from the tree"** at the bottom (only on profiles you can edit; never yourself). Their links go too; children keep their other parent. |
-| **Dating** | Partners card → status **dating**: the couple stands together joined by two blue slashes **∕∕** instead of a line. Requires `supabase/upgrade-3-dating.sql` (run once). |
+| **Dating** | Partners card → status **dating**: the couple stands together joined by two blue slashes **∕∕** instead of a line. |
 | **Separations & divorce** | every person sheet has a **Partners** card: set a link to *separated* or *divorced* (+ year) and the couple line breaks with a **⫽ divorce mark and a blue "divorced · 2010" badge** — obvious at a glance. **Unlink** removes the link entirely: both people stay, children keep both parents, and an ex with no other connection drops off the canvas. |
 | **Remarriage** | the current partner pairs solidly; the ex stays on the other side with the broken line, and shared children keep hanging under the *old* partnership — never under the new partner. See it seeded on Kamal (Granny's brother): Roslinda ⫽ Kamal — Aminah, with Hafiz below. **Married-in exes fade to 70% opacity** — still around, visibly no longer core family (different from deceased, which is greyscale + memorial line; exes keep colour and flag). |
 | **Multiple concurrent marriages** | supported — the earliest marriage pairs; each additional current partner stands on the outer side with a solid line (no break, no fade), their children under them. |
@@ -45,7 +45,7 @@ The login screen lists demo **households (nuclei)** — pick *Aizat & Sarah's ho
 ## 4. Files in this folder
 
 - `app/index.html` — the whole app (single file, no build step)
-- `supabase/schema.sql` — full database schema + Row-Level-Security, ready to paste into Supabase
+- `supabase/migrations/` — the full database history (schema + Row-Level-Security + every upgrade), applied with `supabase db push` — nothing to paste by hand
 - `family-tree-concept.md` — the product spec (data model, RLS design, interaction rules)
 - `wireframe.html` — the annotated wireframe the app was built from
 - `INSTRUCTIONS.md` — this file
@@ -59,7 +59,7 @@ The app is wired to the live Supabase project (`garbnserzkuazmvonfem`). Opening 
 2. By default Supabase requires email confirmation — click the link it sends, then sign in. *(To spare the family this step: Supabase Dashboard → Authentication → Sign In / Providers → Email → turn off "Confirm email".)*
 3. Onboarding → **Start a new family tree** → your name, household name, tree name → you land on a clean tree with just you. Add Sarah and the girls with "Add relative" + **claim** them into your nucleus, then build outward.
 
-**Super users (run `supabase/upgrade-1-super-users.sql` once to enable):** the first household of the tree is automatically the super user; up to **3 per tree**. Supers get a **⭐ button in the top bar** → *Super settings*: manage super users (make / remove), create general invite codes, and see / copy / **delete pending invites**. With `supabase/upgrade-4-super-powers.sql` run, super users can also **edit every person on the tree** — any profile, relationship, or memorial, claimed or not. Only super users can create invites.
+**Super users:** the first household of the tree is automatically the super user; up to **3 per tree**. Supers get a **⭐ button in the top bar** → *Super settings*: manage super users (make / remove), create general invite codes, and see / copy / **delete pending invites**. Super users can also **edit every person on the tree** — any profile, relationship, or memorial, claimed or not. Only super users can create invites.
 
 **Inviting family — two ways (super users only):**
 1. **Personal claim-link (the good one):** open any *unclaimed* person's sheet → **✉ invite [name] to claim this profile** → share the link or hit *send by email*. Whoever opens it creates an account and lands directly as that person — single use, valid 14 days.

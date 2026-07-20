@@ -4,8 +4,9 @@ A private, editable family tree for a big family — per-viewer nicknames, one-s
 focus navigation, living-in flags, memorials, blended families, claim-based stewardship.
 
 - **App:** `app/index.html` — a single self-contained file, no build step.
-- **Backend:** Supabase (auth + Postgres with Row-Level Security). Schema in `supabase/schema.sql`,
-  upgrades in `supabase/upgrade-*.sql`, optional live-sync in `supabase/enable-realtime.sql`.
+- **Backend:** Supabase (auth + Postgres with Row-Level Security). The full database history
+  lives in `supabase/migrations/` (applied via `supabase db push`); optional live-sync in
+  `supabase/enable-realtime.sql`.
 - **Docs:** `INSTRUCTIONS.md` (how to run and use), `family-tree-concept.md` (product spec),
   `wireframe.html` (the annotated wireframe it was built from).
 
