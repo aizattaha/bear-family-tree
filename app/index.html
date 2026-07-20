@@ -185,6 +185,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
     <button class="iconbtn" id="zoomIn">+</button>
     <button class="chip" id="homeBtn">◎ me</button>
     <button class="iconbtn" id="tutBtn" title="tutorial">🎓</button>
+    <button class="iconbtn" id="adminBtn" title="super settings" style="display:none;">⭐</button>
   </div>
   <div id="viewport">
     <div id="world"><svg id="edges"></svg><div id="nodes"></div></div>
@@ -438,9 +439,10 @@ function branchDistance(pid){ // min hops from my nucleus's claimed people
     for(const f of front) for(const n of neighborsOf(f)) if(!seen.has(n)){seen.add(n);nxt.push(n);if(n===pid)return d;}
     front=nxt; if(d>50)break; }
   return Infinity; }
-function canEditPerson(pid){ const p=person(pid);
+function canEditPerson(pid){ if(isSuper())return true; // supers steward the whole tree
+  const p=person(pid);
   return p.claimedBy ? p.claimedBy===S.session.nucleusId : branchDistance(pid)<=5; }
-function canEditMemorial(pid){ return branchDistance(pid)<=5; }
+function canEditMemorial(pid){ return isSuper()||branchDistance(pid)<=5; }
 
 /* ================= names / display ================= */
 const viewing=()=>S.session.viewingAs;
@@ -901,6 +903,7 @@ document.getElementById('zoomIn').onclick=()=>{const r=vp.getBoundingClientRect(
 document.getElementById('zoomOut').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.2);};
 document.getElementById('homeBtn').onclick=()=>centerOn(viewing());
 document.getElementById('tutBtn').onclick=()=>openTutorial(false);
+document.getElementById('adminBtn').onclick=()=>openAdmin();
 document.getElementById('showall').onclick=resetView;
 
 /* ================= minimap ================= */
@@ -1240,14 +1243,8 @@ function openSelf(){ const per=person(viewing());
       <div class="nickrow"><span class="nickname">${esc(members)}</span><span class="who">shared login · always in view</span></div>
       <div class="nickrow"><span class="nickname" style="color:var(--primary);" id="tn_show">${esc(nuc.treeName)}</span>
         <button class="link" onclick="renameTree()">✎ rename</button></div>
-      ${isSuper()?`<div class="nickrow"><span class="nickname">Invite family</span>
-        <button class="link" onclick="makeInvite()">✉ create a code</button></div>`:''}</div>
-    ${isSuper()?`<div class="card"><div class="label">Super users · up to 3</div>
-      ${Object.values(S.nuclei).map(n=>`<div class="nickrow"><span class="nickname">${esc(n.label)}</span>
-        <span class="who">${n.isSuper
-          ?`⭐ super${n.id!==ME.nucleusId?` · <button class="link" onclick="makeSuper('${n.id}',false)">remove</button>`:''}`
-          :`<button class="link" onclick="makeSuper('${n.id}',true)">make super</button>`}</span></div>`).join('')}
-      <div class="cap2" style="margin-top:6px;">super users create invites and can send personal claim-links from any unclaimed profile</div></div>`:''}
+      ${isSuper()?`<div class="nickrow"><span class="nickname">Super settings</span>
+        <button class="link" onclick="openAdmin()">⭐ open</button></div>`:''}</div>
     ${MODE==='cloud'?`<div class="card"><div class="nickrow"><span class="nickname">Invite a friend to start their own tree</span>
       <button class="link" onclick="inviteFriend()">✉ share</button></div></div>`:''}
     <div class="card"><div class="label">Photos — young kid · teen · adult</div>
@@ -1330,7 +1327,41 @@ window.invitePerson=async(pid)=>{
 window.makeSuper=async(nid,flag)=>{
   const {error}=await sb.rpc('set_super',{target:nid,flag});
   if(error){ toast((error.message||'failed').toLowerCase()); return; }
-  S.nuclei[nid].isSuper=flag; openSelf(); toast(flag?'made super user ⭐':'super user removed'); };
+  S.nuclei[nid].isSuper=flag; openAdmin(); toast(flag?'made super user ⭐':'super user removed'); };
+window.openAdmin=async()=>{ if(!isSuper())return;
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Super settings</h3>
+    <div class="card"><div class="label">Super users · up to 3</div>
+      ${Object.values(S.nuclei).map(n=>`<div class="nickrow"><span class="nickname">${esc(n.label)}</span>
+        <span class="who">${n.isSuper
+          ?`⭐ super${n.id!==ME.nucleusId?` · <button class="link" onclick="makeSuper('${n.id}',false)">remove</button>`:''}`
+          :`<button class="link" onclick="makeSuper('${n.id}',true)">make super</button>`}</span></div>`).join('')}
+      <div class="cap2" style="margin-top:6px;">super users can edit everyone on the tree, create invites, and send personal claim-links from any unclaimed profile — use it kindly 🐻</div></div>
+    <div class="card"><div class="label">Invites</div>
+      <div class="nickrow"><span class="nickname">General invite code</span>
+        <button class="link" onclick="makeInvite()">✉ create</button></div>
+      <div id="adm_pending" class="cap2" style="margin-top:4px;">loading pending invites…</div>
+      <div class="cap2" style="margin-top:6px;">personal claim-invites live on each unclaimed person's profile (✉ invite … to claim)</div></div>`);
+  try{
+    const {data,error}=await sb.from('tree_invite').select('*').order('expires_at',{ascending:false});
+    const box=document.getElementById('adm_pending'); if(!box)return;
+    if(error)throw error;
+    if(!data.length){ box.textContent='no pending invites'; return; }
+    box.innerHTML=data.map(i=>{ const dead=new Date(i.expires_at)<new Date();
+      const label=i.invite_name?esc(i.invite_name):(i.person_id?'personal invite':'general code');
+      return `<div class="nickrow"><span class="nickname" style="font-size:13px;">${label}
+          <span class="cap2">${esc(i.code)}${dead?' · expired':''}</span></span>
+        <span class="who">${dead?'':`<button class="link" onclick="copyInviteLink('${esc(i.code)}')">copy</button> · `}
+          <button class="link" onclick="revokeInvite('${esc(i.code)}')">delete</button></span></div>`; }).join('');
+  }catch(e){ const box=document.getElementById('adm_pending');
+    if(box)box.textContent="couldn't load invites — "+((e&&e.message)||e); } };
+window.copyInviteLink=async(code)=>{ const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
+  try{ await navigator.clipboard.writeText(link); toast('link copied'); }
+  catch(e){ prompt('copy the link:',link); } };
+window.revokeInvite=async(code)=>{
+  if(!confirm('Delete this invite? The link and code stop working immediately.'))return;
+  const {error}=await sb.from('tree_invite').delete().eq('code',code);
+  if(error){ dbErr(error); return; }
+  toast('invite deleted'); openAdmin(); };
 window.signOut=async()=>{ if(MODE==='cloud'){ try{ localStorage.removeItem('bft.prefs.'+ME.userId);
     await sb.auth.signOut(); }catch(e){} }
   else { S.session=null; save(); }
@@ -1579,6 +1610,7 @@ function enterApp(){
   document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
   rebuild(); view.s=1; centerOn(viewing()); updateFocusBar();
   if(MODE==='cloud'){ subscribeRealtime(); stampSeen(); }
+  document.getElementById('adminBtn').style.display=isSuper()?'flex':'none';
   try{ if(!localStorage.getItem(tutKey()))setTimeout(()=>openTutorial(true),600); }catch(e){} }
 const IDLE_MS=3*24*60*60*1000; // 3 quiet days → signed out
 function stampSeen(){ if(MODE==='cloud'&&ME.userId)
