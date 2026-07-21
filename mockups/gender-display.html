@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gender display — two options</title>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{ --primary:#004A98; --accent:#B4CEFF; --accent-soft:#E4EEFF; --muted:#E6E5E5;
+  --field:#F7F9FC; --ink:#1A2B44; --ink-soft:#6B7A90;
+  --man:#7FA8E0; --man-soft:#E4EEFF; --man-deep:#004A98; --man-glow:rgba(0,74,152,.30);
+  --woman:#E39CBB; --woman-soft:#FBE7F0; --woman-deep:#B3487A; --woman-glow:rgba(179,72,122,.30);
+  --shadow-soft:0 2px 12px rgba(0,74,152,.06);}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Poppins,-apple-system,sans-serif;background:var(--field);color:var(--ink);
+  padding:40px 24px 80px;font-size:15px;line-height:24px;}
+.page{max-width:900px;margin:0 auto;}
+h1{font-size:24px;font-weight:600;margin-bottom:4px;}
+.sub{font-size:13px;color:var(--ink-soft);margin-bottom:32px;}
+.opt{background:#fff;border-radius:24px;box-shadow:var(--shadow-soft);padding:24px;margin-bottom:32px;}
+.opt h2{font-size:18px;font-weight:600;}
+.opt .cap{font-size:12px;color:var(--ink-soft);margin:2px 0 24px;}
+.row{display:flex;gap:36px;flex-wrap:wrap;justify-content:center;padding:8px 0 4px;}
+.node{width:110px;text-align:center;}
+.avatar{width:64px;height:64px;border-radius:50%;background:var(--field);color:var(--ink-soft);
+  font-weight:600;font-size:18px;display:flex;align-items:center;justify-content:center;
+  margin:0 auto 8px;box-shadow:var(--shadow-soft);position:relative;}
+.photo{background-image:linear-gradient(145deg,#c9b299 0%,#a8876a 55%,#7d6248 100%);}
+.photo.f{background-image:linear-gradient(145deg,#d9b8a5 0%,#b98a77 55%,#8d6355 100%);}
+.photo::after{content:'';position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(circle at 50% 38%,rgba(255,255,255,.35),transparent 42%);}
+.nick{font-size:13px;font-weight:500;line-height:18px;}
+.full{font-size:11px;color:var(--ink-soft);line-height:15px;}
+/* ---------- Option A : soft fill & glow ---------- */
+.a-man-nop{background:var(--man-soft);color:var(--man-deep);}
+.a-woman-nop{background:var(--woman-soft);color:var(--woman-deep);}
+.a-man-ph{box-shadow:0 6px 20px var(--man-glow);}
+.a-woman-ph{box-shadow:0 6px 20px var(--woman-glow);}
+/* ---------- Option B : ring & glow ---------- */
+.b-man{outline:2.5px solid var(--man);outline-offset:2px;}
+.b-woman{outline:2.5px solid var(--woman);outline-offset:2px;}
+.b-man.ph2{box-shadow:0 6px 20px var(--man-glow);}
+.b-woman.ph2{box-shadow:0 6px 20px var(--woman-glow);}
+.legend{display:flex;gap:18px;justify-content:center;font-size:12px;color:var(--ink-soft);margin-top:18px;flex-wrap:wrap;}
+.legend b{color:var(--ink);font-weight:500;}
+.dotm{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--man);vertical-align:-1px;}
+.dotw{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--woman);vertical-align:-1px;}
+</style>
+</head>
+<body>
+<div class="page">
+  <h1>Gender on the tree — two options 🐻</h1>
+  <div class="sub">your rule: colour when there's no photo · background shadow once there is one — <span class="dotm"></span> man (powder blue) · <span class="dotw"></span> woman (soft rose) · no gender set = unchanged neutral</div>
+
+  <div class="opt">
+    <h2>Option A — Soft fill &amp; glow</h2>
+    <div class="cap">no photo: the whole circle takes the gender tint (loud &amp; readable when zoomed out) · with photo: the circle floats on a tinted glow</div>
+    <div class="row">
+      <div class="node"><div class="avatar a-man-nop">AT</div><div class="nick">Atok</div><div class="full">no photo · man</div></div>
+      <div class="node"><div class="avatar a-woman-nop">HI</div><div class="nick">Granny</div><div class="full">no photo · woman</div></div>
+      <div class="node"><div class="avatar photo a-man-ph"></div><div class="nick">Aizat</div><div class="full">photo · man</div></div>
+      <div class="node"><div class="avatar photo f a-woman-ph"></div><div class="nick">Sayang</div><div class="full">photo · woman</div></div>
+    </div>
+    <div class="legend"><span><b>strong</b> at small zoom</span><span>photo state is subtler than no-photo state</span></div>
+  </div>
+
+  <div class="opt">
+    <h2>Option B — Ring &amp; glow</h2>
+    <div class="cap">one language for every state: a slim tinted ring around the circle; photos add the tinted glow underneath</div>
+    <div class="row">
+      <div class="node"><div class="avatar b-man">AT</div><div class="nick">Atok</div><div class="full">no photo · man</div></div>
+      <div class="node"><div class="avatar b-woman">HI</div><div class="nick">Granny</div><div class="full">no photo · woman</div></div>
+      <div class="node"><div class="avatar photo b-man ph2"></div><div class="nick">Aizat</div><div class="full">photo · man</div></div>
+      <div class="node"><div class="avatar photo f b-woman ph2"></div><div class="nick">Sayang</div><div class="full">photo · woman</div></div>
+    </div>
+    <div class="legend"><span><b>consistent</b> before &amp; after photos arrive</span><span>calmer overall; ring echoes the "you" halo</span></div>
+  </div>
+</div>
+</body>
+</html>
