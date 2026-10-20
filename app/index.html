@@ -210,10 +210,15 @@ document.addEventListener('gesturechange',e=>e.preventDefault());
 /* ================= cloud config ================= */
 const SUPABASE_URL='https://garbnserzkuazmvonfem.supabase.co';
 const SUPABASE_KEY='sb_publishable_I-mPsmgwDuPqc20Y09iZ7g_lL1Z_sBp';
+// read before the client swallows the link: a password-reset email lands
+// here with #…type=recovery (or #error_code=otp_expired once it's stale)
+const RESET_LINK=/type=recovery/.test(location.hash);
+const RESET_EXPIRED=/error_code=otp_expired|error=access_denied/.test(location.hash);
 let sb=null; try{ sb=window.supabase?.createClient(SUPABASE_URL,SUPABASE_KEY,
   {auth:{lock:(_n,_t,fn)=>fn()}}); }catch(e){} // no-op lock: navigator.locks hangs on file:// pages
 const APP_URL='https://aizattaha.github.io/bear-family-tree/'; // the family's home — invite links point here
 let MODE='demo';                       // 'cloud' after sign-in
+let DEMO_CHOSEN=false;                 // "try the local demo" clicked — don't resume a saved sign-in
 const ME={userId:null,nucleusId:null,treeId:null};
 let PENDING_INVITE=null;               // #invite=CODE in the link → survives the sign-up dance
 let PENDING_NEWTREE=null;              // #newtree → a friend starting their OWN tree
@@ -329,19 +334,23 @@ function save(){
 
 /* ================= cloud data layer ================= */
 const MAIN2DB={k:'kid',t:'teen',a:'adult'}, DB2MAIN={kid:'k',teen:'t',adult:'a'};
+// photos are only ever images the app made itself — anything else is never put on the page
+const okPhoto=s=>typeof s==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(s);
+const BORN_RE=/^\d{4}(-\d{2}-\d{2})?$/;
 function personFromRow(r){ const photos={};
-  if(r.photo_kid)photos.k=r.photo_kid; if(r.photo_teen)photos.t=r.photo_teen; if(r.photo_adult)photos.a=r.photo_adult;
+  if(okPhoto(r.photo_kid))photos.k=r.photo_kid; if(okPhoto(r.photo_teen))photos.t=r.photo_teen;
+  if(okPhoto(r.photo_adult))photos.a=r.photo_adult;
   return {id:r.id,name:r.full_name,gender:r.gender||'',couplePos:r.couple_pos||'',born:r.born||'',
     country:r.living_country||'',notes:r.notes||'',claimedBy:r.claimed_by,photos,
     mainPhoto:DB2MAIN[r.main_photo]||'a',passed:null}; }
 async function cloudFetchAll(){
-  const [acc,nuc,per,rel,nick,mem]=await Promise.all([
+  const [acc,nuc,per,rel,nick,mem]=await withTimeout(Promise.all([
     sb.from('account').select('nucleus_id'),
     sb.from('nucleus').select('*'),
     sb.from('person').select('*').is('deleted_at',null),
     sb.from('relationship').select('*'),
     sb.from('nickname').select('*'),
-    sb.from('memorial').select('*')]);
+    sb.from('memorial').select('*')]));
   for(const r of [acc,nuc,per,rel,nick,mem]) if(r.error)throw r.error;
   ME.nucleusId=acc.data[0]?.nucleus_id||null;
   if(!ME.nucleusId)return false; // no account row yet → onboarding
@@ -350,58 +359,67 @@ async function cloudFetchAll(){
   S.persons={}; per.data.forEach(r=>S.persons[r.id]=personFromRow(r));
   mem.data.forEach(m=>{ const p=S.persons[m.person_id];
     if(p)p.passed={date:m.passed_on||'',styleId:m.style_id||'gen1',custom:m.custom_text||''}; });
-  S.rels=rel.data.map(r=>({id:r.id,kind:r.kind==='partner'?'pt':'pc',a:r.person_a,b:r.person_b,
+  // a link to someone removed (or half-removed) must never blank the tree
+  S.rels=rel.data.filter(r=>S.persons[r.person_a]&&S.persons[r.person_b]).map(r=>({id:r.id,kind:r.kind==='partner'?'pt':'pc',a:r.person_a,b:r.person_b,
     status:r.status||'together',ended:r.ended||undefined}));
   S.nicknames={}; nick.data.forEach(n=>{
     (S.nicknames[n.viewer_person_id]=S.nicknames[n.viewer_person_id]||{})[n.person_id]=n.text; });
   return true; }
-function dbErr(e){ console.error('sync',e); toast('sync failed — '+((e&&e.message)||e)); }
+// "can't reach Supabase" looks different in every browser — one test for all of them
+const isNetErr=e=>!!e&&(e.name==='AuthRetryableFetchError'||
+  /failed to fetch|load failed|networkerror|network request failed|timed out/i.test(String(e.message||e)));
+function withTimeout(p,ms){ return Promise.race([p,new Promise((_,no)=>
+  setTimeout(()=>no(new Error('timed out')),ms||15000))]); }
+function dbErr(e){ console.error('sync',e);
+  toast(isNetErr(e)?"not saved — we can't reach the family tree right now. Your screen has been put back; please try again in a moment."
+    :"not saved — the family tree didn't accept that change (it may be outside what you can edit). Your screen has been put back.",7000); }
+// a refused update/delete comes back as "success, 0 rows changed" — count the rows
+async function wrote(q,col){ const {data,error}=await q.select(col||'id');
+  if(error)throw error; if(!data||!data.length)throw new Error('0 rows changed'); return data; }
+async function attempt(fn){ if(!db.on())return true;
+  try{ await fn(); return true; }catch(e){ dbErr(e); return false; } }
 const db={
   on:()=>MODE==='cloud',
-  async upsertNick(viewer,pid,text){ if(!db.on())return;
-    if(text){ const {error}=await sb.from('nickname').upsert(
+  // every write resolves true (saved) or false (refused — the person has been told)
+  upsertNick(viewer,pid,text,had){ return attempt(async()=>{
+    if(text)await wrote(sb.from('nickname').upsert(
       {tree_id:ME.treeId,person_id:pid,viewer_person_id:viewer,text},
-      {onConflict:'person_id,viewer_person_id'}); if(error)dbErr(error); }
-    else { const {error}=await sb.from('nickname').delete()
-      .match({person_id:pid,viewer_person_id:viewer}); if(error)dbErr(error); } },
-  async savePerson(p){ if(!db.on())return;
-    const {error}=await sb.from('person').update({full_name:p.name,gender:p.gender||null,
+      {onConflict:'person_id,viewer_person_id'}));
+    else if(had)await wrote(sb.from('nickname').delete()
+      .match({person_id:pid,viewer_person_id:viewer})); }); },
+  savePerson(p){ return attempt(()=>wrote(sb.from('person').update({full_name:p.name,gender:p.gender||null,
       couple_pos:p.couplePos||null,born:p.born||null,living_country:p.country||null,
       notes:p.notes||'',main_photo:MAIN2DB[p.mainPhoto]||'adult',
       photo_kid:p.photos.k||null,photo_teen:p.photos.t||null,photo_adult:p.photos.a||null})
-      .eq('id',p.id); if(error)dbErr(error); },
-  async saveMemorial(p){ if(!db.on())return;
-    if(p.passed){ const {error}=await sb.from('memorial').upsert({person_id:p.id,tree_id:ME.treeId,
-      passed_on:p.passed.date||null,style_id:p.passed.styleId||'gen1',custom_text:p.passed.custom||null});
-      if(error)dbErr(error); }
-    else { const {error}=await sb.from('memorial').delete().eq('person_id',p.id); if(error)dbErr(error); } },
-  async insertPerson(p){ if(!db.on())return;
-    const {error}=await sb.from('person').insert({id:p.id,tree_id:ME.treeId,full_name:p.name,
+      .eq('id',p.id))); },
+  saveMemorial(p,had){ return attempt(async()=>{
+    if(p.passed)await wrote(sb.from('memorial').upsert({person_id:p.id,tree_id:ME.treeId,
+      passed_on:p.passed.date||null,style_id:p.passed.styleId||'gen1',custom_text:p.passed.custom||null}),'person_id');
+    else if(had)await wrote(sb.from('memorial').delete().eq('person_id',p.id),'person_id'); }); },
+  insertPerson(p){ return attempt(()=>wrote(sb.from('person').insert({id:p.id,tree_id:ME.treeId,full_name:p.name,
       gender:p.gender||null,born:p.born||null,living_country:p.country||null,
-      claimed_by:p.claimedBy||null}); if(error)dbErr(error); },
-  async insertRel(r){ if(!db.on())return;
-    const {data,error}=await sb.from('relationship').insert({tree_id:ME.treeId,
+      claimed_by:p.claimedBy||null}))); },
+  insertRel(r){ return attempt(async()=>{
+    const d=await wrote(sb.from('relationship').insert({tree_id:ME.treeId,
       person_a:r.a,person_b:r.b,kind:r.kind==='pt'?'partner':'parent-child',
-      status:r.status||'together',ended:r.ended||null}).select('id').single();
-    if(error)dbErr(error); else r.id=data.id; },
-  async updateRel(r){ if(!db.on()||!r.id)return;
-    const {error}=await sb.from('relationship').update({status:r.status||'together',ended:r.ended||null})
-      .eq('id',r.id); if(error)dbErr(error); },
-  async deleteRelPair(a,b){ if(!db.on())return;
-    const {error}=await sb.from('relationship').delete().eq('kind','partner')
-      .or(`and(person_a.eq.${a},person_b.eq.${b}),and(person_a.eq.${b},person_b.eq.${a})`);
-    if(error)dbErr(error); },
-  async deletePerson(pid){ if(!db.on())return;
-    const {error:e1}=await sb.from('relationship').delete()
+      status:r.status||'together',ended:r.ended||null}));
+    r.id=d[0].id; }); },
+  updateRel(r){ return attempt(async()=>{ if(!r.id)throw new Error('link not saved yet');
+    await wrote(sb.from('relationship').update({status:r.status||'together',ended:r.ended||null})
+      .eq('id',r.id)); }); },
+  deleteRelPair(a,b){ return attempt(()=>wrote(sb.from('relationship').delete().eq('kind','partner')
+      .or(`and(person_a.eq.${a},person_b.eq.${b}),and(person_a.eq.${b},person_b.eq.${a})`))); },
+  deletePerson(pid,hadLinks){ return attempt(async()=>{
+    // person first, while their links still prove they're within reach;
+    // if the database says no, nothing has changed yet
+    await wrote(sb.from('person').update({deleted_at:new Date().toISOString()}).eq('id',pid));
+    if(hadLinks){ const {error}=await sb.from('relationship').delete()
       .or(`person_a.eq.${pid},person_b.eq.${pid}`);
-    if(e1)dbErr(e1);
-    const {error}=await sb.from('person').update({deleted_at:new Date().toISOString()})
-      .eq('id',pid); if(error)dbErr(error); },
-  async claim(pid){ if(!db.on())return;
-    const {error}=await sb.rpc('claim_person',{p:pid}); if(error)dbErr(error); },
-  async renameNucleus(name){ if(!db.on())return;
-    const {error}=await sb.from('nucleus').update({tree_name:name}).eq('id',ME.nucleusId);
-    if(error)dbErr(error); },
+      if(error)console.error('sync',error); } }); }, // links to a removed person are ignored on load
+  claim(pid){ return attempt(async()=>{
+    const {error}=await sb.rpc('claim_person',{p:pid}); if(error)throw error; }); },
+  renameNucleus(name){ return attempt(()=>wrote(sb.from('nucleus').update({tree_name:name})
+      .eq('id',ME.nucleusId))); },
   async invite(){ const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId})
     .select('code').single(); if(error){dbErr(error);return null;} return data.code; } };
 let refetchT=null;
@@ -790,11 +808,9 @@ function rebuild(origin){
   for(const pid of vis){ const p=pos[pid]; if(!p)continue; seen.add(pid);
     const per=person(pid); const isYou=pid===viewing();
     const passed=!!per.passed;
-    const photo=per.photos[per.mainPhoto]||per.photos.a||per.photos.t||per.photos.k;
-    const initials=per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
     const nick=nickFor(pid)||per.name.split(' ')[0];
     let inner=`<button class="addfab" data-add="${pid}" title="add relative">＋</button>
-      <div class="avatar">${photo?`<img src="${photo}" alt="">`:initials}
+      <div class="avatar">${faceHtml(per)}
         ${(!passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>
       <div class="nick">${esc(nick)}</div><div class="full">${esc(per.name)}</div>
       ${passed?`<div class="passedon">${esc(memorialLine(per))}</div>`:''}
@@ -844,7 +860,11 @@ function rebuild(origin){
     else el.remove(); }
   drawMinimap(); }
 const pendingChips={};
-function esc(s){ return String(s||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+// a person's face: their photo if it's one the app made, else their initials — both made page-safe
+function faceHtml(per){ const photo=per.photos[per.mainPhoto]||per.photos.a||per.photos.t||per.photos.k;
+  if(okPhoto(photo))return `<img src="${esc(photo)}" alt="">`;
+  return esc(per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()); }
 nodesEl.addEventListener('click',e=>{
   const add=e.target.closest('.addfab');
   if(add){ openAdd(add.dataset.add); return; }
@@ -929,7 +949,9 @@ mm.addEventListener('click',e=>{ const {bounds}=layout; const r=mm.getBoundingCl
 /* ================= sheet infra ================= */
 const scrim=document.getElementById('scrim'), sheet=document.getElementById('sheet'),
       sheetbody=document.getElementById('sheetbody');
-function openSheet(html){ sheetbody.innerHTML=html;
+let sheetPid=null; // whose card is open, so a refused save can redraw it
+function refreshSheet(pid){ if(sheetPid===pid&&sheet.classList.contains('open')&&person(pid))openPerson(pid); }
+function openSheet(html,pid){ sheetbody.innerHTML=html; sheetPid=pid||null;
   // person-data fields must never trigger contact/credit-card autofill
   sheetbody.querySelectorAll('input:not([autocomplete]),textarea:not([autocomplete])')
     .forEach(i=>i.setAttribute('autocomplete','off'));
@@ -938,8 +960,8 @@ function openSheet(html){ sheetbody.innerHTML=html;
 function closeSheet(){ sheet.classList.remove('open'); scrim.style.display='none'; }
 scrim.onclick=closeSheet;
 let toastT=null;
-function toast(msg){ const t=document.getElementById('toast'); t.textContent=msg;
-  t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),2600); }
+function toast(msg,ms){ const t=document.getElementById('toast'); t.textContent=msg;
+  t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),ms||2600); }
 
 /* ================= tutorial (3 steps) ================= */
 let TUT_STEP=0, TUT_FORCED=false;
@@ -968,10 +990,9 @@ function renderTutorial(){
 
 /* ================= person sheet ================= */
 const SLOT_LABELS={k:'young kid',t:'teen · young adult',a:'adult'};
-function avatarHtml(per,size){ const photo=per.photos[per.mainPhoto]||per.photos.a||per.photos.t||per.photos.k;
-  const initials=per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
+function avatarHtml(per,size){
   const st=per.passed?'filter:grayscale(1);opacity:.85;':'';
-  return `<div class="avatar" style="${st}">${photo?`<img src="${photo}">`:initials}
+  return `<div class="avatar" style="${st}">${faceHtml(per)}
     ${(!per.passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>`; }
 function partnersCardHtml(pid){
   const prels=S.rels.filter(r=>r.kind==='pt'&&(r.a===pid||r.b===pid));
@@ -1013,21 +1034,29 @@ function childrenCardHtml(pid){
   ].join('');
   return `<div class="card"><div class="label">Children</div>${rows}
     ${unlinked.length?`<div class="cap2" style="margin-top:6px;">"not linked" = their partner's child only (a step-child) — tap link if they're actually ${esc(displayName(pid))}'s child too</div>`:''}</div>`; }
-window.linkChild=(parent,child)=>{
+// every edit shows at once; if the database refuses it, the screen is put back
+function undone(pid){ save(); rebuild(); if(pid)refreshSheet(pid); }
+window.linkChild=async(parent,child)=>{
   const r={kind:'pc',a:parent,b:child};
-  S.rels.push(r); db.insertRel(r);
-  save(); rebuild(); openPerson(parent); toast('linked — '+person(child).name); };
-window.setPStatus=(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
+  S.rels.push(r);
+  save(); rebuild(); openPerson(parent); toast('linked — '+person(child).name);
+  if(!await db.insertRel(r)){ S.rels=S.rels.filter(x=>x!==r); undone(parent); } };
+function restoreRel(r,was){ r.status=was.status; if(was.ended===undefined)delete r.ended; else r.ended=was.ended; }
+window.setPStatus=async(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
+  const was={status:r.status,ended:r.ended};
   r.status=v; if(isCurrent(v))delete r.ended;
-  db.updateRel(r);
-  save(); rebuild(); openPerson(a); toast(v==='together'?'marked together':'marked '+v); };
-window.setPEnded=(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
-  r.ended=v.trim(); db.updateRel(r); save(); rebuild(); };
-window.unlinkPartner=(a,b)=>{
+  save(); rebuild(); openPerson(a); toast(v==='together'?'marked together':'marked '+v);
+  if(!await db.updateRel(r)){ restoreRel(r,was); undone(a); } };
+window.setPEnded=async(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
+  const was={status:r.status,ended:r.ended};
+  r.ended=v.trim(); save(); rebuild();
+  if(!await db.updateRel(r)){ restoreRel(r,was); undone(a); } };
+window.unlinkPartner=async(a,b)=>{
   if(!confirm('Remove the partner link between '+person(a).name+' and '+person(b).name+'?\n\nBoth people stay in the tree — only the link is removed. Children keep both parents.'))return;
-  S.rels=S.rels.filter(r=>!(r.kind==='pt'&&((r.a===a&&r.b===b)||(r.a===b&&r.b===a))));
-  db.deleteRelPair(a,b);
-  save(); rebuild(); openPerson(a); toast('partner link removed'); };
+  const pair=r=>r.kind==='pt'&&((r.a===a&&r.b===b)||(r.a===b&&r.b===a));
+  const gone=S.rels.filter(pair); S.rels=S.rels.filter(r=>!pair(r));
+  save(); rebuild(); openPerson(a); toast('partner link removed');
+  if(!await db.deleteRelPair(a,b)){ S.rels.push(...gone); undone(a); } };
 function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
   const per=person(pid); const editable=canEditPerson(pid); const memEditable=canEditMemorial(pid);
   const dist=branchDistance(pid);
@@ -1046,7 +1075,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
   openSheet(`
     <div class="profile">${avatarHtml(per)}
       <div><h3>${esc(per.name)}</h3>
-        <div class="cap2">${facts}</div>
+        <div class="cap2">${esc(facts)}</div>
         ${per.passed?`<div class="cap2">${esc(memorialLine(per))}</div>`:''}
         <div class="cap2" style="color:var(--primary);">${claimedLabel}</div></div></div>
     ${!per.claimedBy?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="claimPerson('${pid}')">claim — this is me / in my nucleus</button>`:''}
@@ -1100,7 +1129,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
       <button class="btn secondary" onclick="openAdd('${pid}')">Add relative</button>
       ${(editable||memEditable)?`<button class="btn primary" onclick="savePerson('${pid}')">Save</button>`:''}
     </div>
-    ${editable?`<button class="link" style="display:block;margin:14px auto 0;color:var(--bad,#D25353);" onclick="deletePersonUI('${pid}')">remove ${esc(displayName(pid))} from the tree</button>`:''}`);
+    ${editable?`<button class="link" style="display:block;margin:14px auto 0;color:var(--bad,#D25353);" onclick="deletePersonUI('${pid}')">remove ${esc(displayName(pid))} from the tree</button>`:''}`,pid);
   document.getElementById('moreBtn').onclick=()=>{ const m=document.getElementById('moreFields');
     const show=m.style.display==='none'; m.style.display=show?'block':'none';
     document.getElementById('moreBtn').textContent=show?'− more':'+ more'; };
@@ -1108,65 +1137,84 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
   const styleSel=document.getElementById('f_style');
   if(styleSel)styleSel.onchange=()=>{document.getElementById('customWrap').style.display=styleSel.value==='custom'?'block':'none';};
 }
-function photoSlot(per,slot,editable){ const ph=per.photos[slot];
+function photoSlot(per,slot,editable){ const ph=okPhoto(per.photos[slot])?per.photos[slot]:null;
   const isMain=per.mainPhoto===slot&&ph;
   return `<div class="pslot"><div class="ph ${isMain?'main':''}" onclick="${editable?`pickPhoto('${per.id}','${slot}')`:''}" style="${per.passed&&ph?'filter:grayscale(1);':''}">
-    ${ph?`<img src="${ph}">`:'＋'}</div>
+    ${ph?`<img src="${esc(ph)}">`:'＋'}</div>
     <div class="pl">${SLOT_LABELS[slot]}</div>
     ${ph?`<span class="star ${isMain?'on':''}" onclick="${editable?`setMain('${per.id}','${slot}')`:''}">${isMain?'★ on tree':'☆ use on tree'}</span>`:''}</div>`; }
 let photoTarget=null;
 window.pickPhoto=(pid,slot)=>{ photoTarget={pid,slot}; document.getElementById('fileinput').click(); };
-window.setMain=(pid,slot)=>{ person(pid).mainPhoto=slot; db.savePerson(person(pid));
-  save(); rebuild(); openPerson(pid); toast('tree photo updated'); };
+window.setMain=async(pid,slot)=>{ const per=person(pid), was=per.mainPhoto; per.mainPhoto=slot;
+  save(); rebuild(); openPerson(pid); toast('tree photo updated');
+  if(!await db.savePerson(per)){ per.mainPhoto=was; undone(pid); } };
 document.getElementById('fileinput').addEventListener('change',e=>{
   const f=e.target.files[0]; e.target.value=''; if(!f||!photoTarget)return;
   const img=new Image(); const url=URL.createObjectURL(f);
-  img.onload=()=>{ const max=384; let w=img.width,h=img.height;
+  img.onload=async()=>{ const max=384; let w=img.width,h=img.height;
     const sc=Math.min(1,max/Math.max(w,h)); w=Math.round(w*sc);h=Math.round(h*sc);
     const cv=document.createElement('canvas'); cv.width=w;cv.height=h;
     cv.getContext('2d').drawImage(img,0,0,w,h);
     const data=cv.toDataURL('image/jpeg',0.78);
-    const per=person(photoTarget.pid); per.photos[photoTarget.slot]=data;
+    const pid=photoTarget.pid, per=person(pid);
+    const was={photos:{...per.photos},mainPhoto:per.mainPhoto};
+    per.photos[photoTarget.slot]=data;
     if(!per.photos[per.mainPhoto])per.mainPhoto=photoTarget.slot;
-    db.savePerson(per);
-    save(); rebuild(); openPerson(photoTarget.pid); toast('photo saved'); URL.revokeObjectURL(url); };
+    save(); rebuild(); openPerson(pid); toast('photo saved'); URL.revokeObjectURL(url);
+    if(!await db.savePerson(per)){ per.photos=was.photos; per.mainPhoto=was.mainPhoto; undone(pid); } };
   img.src=url; });
-window.saveNick=(pid)=>{ const v=document.getElementById('mynick').value.trim();
-  if(!S.nicknames[viewing()])S.nicknames[viewing()]={};
-  if(v)S.nicknames[viewing()][pid]=v; else delete S.nicknames[viewing()][pid];
-  db.upsertNick(viewing(),pid,v);
-  save(); rebuild(); toast(v?`saved — you call them ${v}`:'nickname removed'); };
-window.deletePersonUI=(pid)=>{ const per=person(pid); if(!per||pid===viewing())return;
+window.saveNick=async(pid)=>{ const v=document.getElementById('mynick').value.trim(), me=viewing();
+  if(!S.nicknames[me])S.nicknames[me]={};
+  const was=S.nicknames[me][pid];
+  if(v)S.nicknames[me][pid]=v; else delete S.nicknames[me][pid];
+  save(); rebuild(); toast(v?`saved — you call them ${v}`:'nickname removed');
+  if(!await db.upsertNick(me,pid,v,was!==undefined)){
+    if(was!==undefined)S.nicknames[me][pid]=was; else delete S.nicknames[me][pid];
+    undone(pid); } };
+window.deletePersonUI=async(pid)=>{ const per=person(pid); if(!per||pid===viewing())return;
   if(!confirm(`Remove ${per.name} from the tree?\n\nTheir links to everyone disappear too — photos and details go with them. Children they have keep their other parent.`))return;
+  const links=S.rels.filter(r=>r.a===pid||r.b===pid), nicks={}, own=S.nicknames[pid];
+  for(const v in S.nicknames)if(pid in S.nicknames[v])nicks[v]=S.nicknames[v][pid];
   delete S.persons[pid];
   S.rels=S.rels.filter(r=>r.a!==pid&&r.b!==pid);
   for(const v in S.nicknames)delete S.nicknames[v][pid];
   delete S.nicknames[pid];
-  db.deletePerson(pid);
-  save(); closeSheet(); rebuild(); toast('removed — '+per.name); };
-window.claimPerson=(pid)=>{ person(pid).claimedBy=S.session.nucleusId;
-  db.claim(pid); save(); openPerson(pid);
-  toast('claimed into your nucleus'); };
-window.savePerson=(pid)=>{ const per=person(pid);
+  save(); closeSheet(); rebuild(); toast('removed — '+per.name);
+  if(!await db.deletePerson(pid,links.length>0)){ S.persons[pid]=per; S.rels.push(...links);
+    if(own)S.nicknames[pid]=own;
+    for(const v in nicks)(S.nicknames[v]=S.nicknames[v]||{})[pid]=nicks[v];
+    undone(); } };
+window.claimPerson=async(pid)=>{ const was=person(pid).claimedBy; person(pid).claimedBy=S.session.nucleusId;
+  save(); openPerson(pid); toast('claimed into your nucleus');
+  if(!await db.claim(pid)){ person(pid).claimedBy=was; undone(pid); } };
+// Born is a year or a full date — the database refuses anything else, so say so here first
+function bornOk(b){ if(!b||BORN_RE.test(b))return true;
+  toast('born should be a year like 1950, or a full date like 1950-06-04',5000); return false; }
+window.savePerson=async(pid)=>{ const per=person(pid);
   const editable=canEditPerson(pid), memEditable=canEditMemorial(pid);
-  if(editable){ const n=document.getElementById('f_name').value.trim();
-    if(!n){toast('name is needed');return;}
-    per.name=n; per.born=document.getElementById('f_born').value.trim();
-    per.country=document.getElementById('f_country').value;
-    per.gender=document.getElementById('f_gender').value;
-    per.couplePos=document.getElementById('f_cpos').value;
-    per.notes=document.getElementById('f_notes').value; }
-  if(memEditable){ const d=document.getElementById('f_passed').value.trim().toLowerCase();
-    const styleId=document.getElementById('f_style').value;
+  const val=id=>document.getElementById(id).value;
+  if(editable){ if(!val('f_name').trim()){toast('name is needed');return;}
+    if(!bornOk(val('f_born').trim()))return; }
+  const d=memEditable?val('f_passed').trim().toLowerCase():'';
+  if(d&&d!=='unknown'&&!BORN_RE.test(d)){toast('date should be YYYY or YYYY-MM-DD');return;}
+  const was=JSON.parse(JSON.stringify(per)), hadMemorial=!!per.passed;
+  if(editable){ per.name=val('f_name').trim(); per.born=val('f_born').trim();
+    per.country=val('f_country');
+    per.gender=val('f_gender');
+    per.couplePos=val('f_cpos');
+    per.notes=val('f_notes'); }
+  if(memEditable){ const styleId=val('f_style');
     const custom=document.getElementById('f_custom')?.value||'';
     if(d==='unknown'){ per.passed={date:'',styleId,custom}; }
-    else if(d){ if(!/^\d{4}(-\d{2}-\d{2})?$/.test(d)){toast('date should be YYYY or YYYY-MM-DD');return;}
-      per.passed={date:d,styleId,custom}; }
-    else if(per.passed&&!per.passed.date&&d===''){ /* keep passed-no-date if it was set */ }
+    else if(d){ per.passed={date:d,styleId,custom}; }
+    else if(per.passed&&!per.passed.date){ /* keep passed-no-date if it was set */ }
     else per.passed=null; }
-  if(editable)db.savePerson(per);
-  if(memEditable)db.saveMemorial(per);
-  save(); rebuild(); closeSheet(); toast('saved — '+per.name); };
+  save(); rebuild(); closeSheet(); toast('saved — '+per.name);
+  const okP=!editable||await db.savePerson(per);
+  const okM=!memEditable||await db.saveMemorial(per,hadMemorial);
+  if(!okP){ const passed=per.passed; Object.assign(per,was); per.passed=passed; }
+  if(!okM)per.passed=was.passed;
+  if(!okP||!okM)undone(); };
 
 /* ================= add person ================= */
 window.openAdd=(anchor)=>{ const a=person(anchor);
@@ -1201,6 +1249,7 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
   document.getElementById('a_save').onclick=()=>{
     const name=document.getElementById('a_name').value.trim();
     if(!name){toast('name is needed');return;}
+    if(!bornOk(document.getElementById('a_born').value.trim()))return;
     const id=(MODE==='cloud'&&crypto.randomUUID)?crypto.randomUUID():'p'+Date.now().toString(36);
     S.persons[id]={id,name,gender:document.getElementById('a_gender').value,couplePos:'',
       born:document.getElementById('a_born').value.trim(),
@@ -1215,9 +1264,10 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
     else if(rel==='childsolo')newRels.push({kind:'pc',a:anchor,b:id});
     else if(rel==='sibling')parentsOf(anchor).forEach(p=>newRels.push({kind:'pc',a:p,b:id}));
     newRels.forEach(r=>S.rels.push(r));
-    (async()=>{ await db.insertPerson(S.persons[id]);
-      for(const r of newRels)await db.insertRel(r); })();
-    save(); rebuild(); closeSheet(); toast('added — '+name+' (unverified)'); };
+    save(); rebuild(); closeSheet(); toast('added — '+name+' (unverified)');
+    (async()=>{ if(!await db.insertPerson(S.persons[id])){
+        delete S.persons[id]; S.rels=S.rels.filter(r=>!newRels.includes(r)); undone(); return; }
+      for(const r of newRels) if(!await db.insertRel(r)){ S.rels=S.rels.filter(x=>x!==r); undone(); } })(); };
 };
 
 /* ================= own profile ================= */
@@ -1269,20 +1319,24 @@ function openSelf(){ const per=person(viewing());
       <button class="btn secondary" onclick="openAdd('${viewing()}')">Add relative</button>
       <button class="btn primary" onclick="saveSelf()">Save</button></div>
     <p class="cap2" style="margin-top:10px;">nicknames are set by each person for themselves to use — to change what you call someone, edit it on their profile.</p>
-    <button class="link" onclick="signOut()" style="display:block;margin:10px auto 0;">sign out</button>`); }
-window.saveSelf=()=>{ const per=person(viewing());
+    <button class="link" onclick="signOut()" style="display:block;margin:10px auto 0;">sign out</button>`,viewing()); }
+window.saveSelf=async()=>{ const per=person(viewing());
   const n=document.getElementById('f_name').value.trim(); if(!n){toast('name is needed');return;}
-  per.name=n; per.born=document.getElementById('f_born').value.trim();
+  const born=document.getElementById('f_born').value.trim(); if(!bornOk(born))return;
+  const was=JSON.parse(JSON.stringify(per));
+  per.name=n; per.born=born;
   per.country=document.getElementById('f_country').value;
   per.gender=document.getElementById('f_gender').value;
   per.couplePos=document.getElementById('f_cpos').value;
-  db.savePerson(per);
-  save(); rebuild(); closeSheet(); toast('saved'); };
-window.renameTree=()=>{ const nuc=S.nuclei[S.session.nucleusId];
+  save(); rebuild(); closeSheet(); toast('saved');
+  if(!await db.savePerson(per)){ Object.assign(per,was); undone(); } };
+window.renameTree=async()=>{ const nuc=S.nuclei[S.session.nucleusId];
   const v=prompt('your name for this tree — only your nucleus sees it',nuc.treeName);
-  if(v&&v.trim()){ nuc.treeName=v.trim(); db.renameNucleus(nuc.treeName);
-    save(); document.getElementById('treename').textContent=nuc.treeName;
-    const el=document.getElementById('tn_show'); if(el)el.textContent=nuc.treeName; toast('renamed — '+nuc.treeName); } };
+  const show=()=>{ save(); document.getElementById('treename').textContent=nuc.treeName;
+    const el=document.getElementById('tn_show'); if(el)el.textContent=nuc.treeName; };
+  if(v&&v.trim()){ const was=nuc.treeName; nuc.treeName=v.trim();
+    show(); toast('renamed — '+nuc.treeName);
+    if(!await db.renameNucleus(nuc.treeName)){ nuc.treeName=was; show(); } } };
 function inviteDialog(code,forName){
   const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
   const mail='mailto:?subject='+encodeURIComponent('Join our family tree 🐻')
@@ -1351,8 +1405,11 @@ window.openAdmin=async()=>{ if(!isSuper())return;
       const label=i.invite_name?esc(i.invite_name):(i.person_id?'personal invite':'general code');
       return `<div class="nickrow"><span class="nickname" style="font-size:13px;">${label}
           <span class="cap2">${esc(i.code)}${dead?' · expired':''}</span></span>
-        <span class="who">${dead?'':`<button class="link" onclick="copyInviteLink('${esc(i.code)}')">copy</button> · `}
-          <button class="link" onclick="revokeInvite('${esc(i.code)}')">delete</button></span></div>`; }).join('');
+        <span class="who">${dead?'':`<button class="link" data-copy="${esc(i.code)}">copy</button> · `}
+          <button class="link" data-revoke="${esc(i.code)}">delete</button></span></div>`; }).join('');
+    // codes go in data-attributes, never inside onclick="…" strings
+    box.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>copyInviteLink(b.dataset.copy));
+    box.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>revokeInvite(b.dataset.revoke));
   }catch(e){ const box=document.getElementById('adm_pending');
     if(box)box.textContent="couldn't load invites — "+((e&&e.message)||e); } };
 window.copyInviteLink=async(code)=>{ const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
@@ -1410,7 +1467,55 @@ function loginCard(inner){ const el=document.getElementById('login');
   el.innerHTML=`<div class="card"><div class="bear">🐻</div>${inner}</div>`;
   el.querySelectorAll('input:not([autocomplete])').forEach(i=>i.setAttribute('autocomplete','off'));
   return el; }
-function renderLogin(signup,prefillEmail){
+// Supabase unreachable (paused, offline, blocked): a calm card, never a raw "failed to fetch"
+function renderOffline(retry){ MODE='demo';
+  loginCard(`<h1>Can't reach the tree</h1>
+    <div class="cap">We can't reach the family tree right now — your tree is safe and this isn't your password.</div>
+    <div class="cap" style="margin-bottom:14px;">Check your internet, or try again in a few minutes.</div>
+    <button class="btn primary" style="width:100%;" id="off_retry">Try again</button>`);
+  document.getElementById('off_retry').onclick=retry||(()=>location.reload()); }
+function renderForgot(prefill){
+  loginCard(`<h1>Forgot your password?</h1>
+    <div class="cap">type your login email — we'll send you a link to choose a new password</div>
+    <form id="fp_form" name="forgot" method="post" action="#">
+      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="fp_email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(prefill||'')}"></div>
+      <div id="fp_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
+      <button type="submit" class="btn primary" style="width:100%;">Send reset link</button>
+    </form>
+    <button class="link" id="fp_back" style="margin-top:12px;">back to sign in</button>`);
+  const msg=t=>{document.getElementById('fp_msg').textContent=t;};
+  document.getElementById('fp_back').onclick=()=>renderLogin(false,document.getElementById('fp_email').value.trim());
+  document.getElementById('fp_form').onsubmit=async e=>{ e.preventDefault();
+    const email=document.getElementById('fp_email').value.trim();
+    if(!email){msg('your email, please');return;}
+    if(!sb){renderOffline();return;}
+    msg('sending…');
+    try{ const {error}=await withTimeout(sb.auth.resetPasswordForEmail(email,{redirectTo:APP_URL}));
+      if(error)throw error; }
+    catch(e){ if(isNetErr(e)){renderOffline(()=>renderForgot(email));return;}
+      msg((e.message||'could not send the link').toLowerCase()); return; }
+    msg("if that email has a login, a reset link is on its way — open it on this phone or computer. It can take a few minutes; check spam too."); }; }
+let RECOVERING=RESET_LINK; // arrived from a reset email → choose a new password before anything else
+function renderNewPassword(){ RECOVERING=true;
+  loginCard(`<h1>Choose a new password</h1>
+    <div class="cap">you came from a reset link — pick a new password for your login</div>
+    <form id="np_form" name="reset" method="post" action="#">
+      <div class="fld" style="text-align:left;"><span class="flabel">New password</span><input id="np_pass" name="new-password" type="password" autocomplete="new-password"></div>
+      <div id="np_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
+      <button type="submit" class="btn primary" style="width:100%;">Save new password</button>
+    </form>`);
+  const msg=t=>{document.getElementById('np_msg').textContent=t;};
+  document.getElementById('np_form').onsubmit=async e=>{ e.preventDefault();
+    const password=document.getElementById('np_pass').value;
+    if(password.length<6){msg('password needs at least 6 characters');return;}
+    msg('saving…');
+    try{ const {error}=await withTimeout(sb.auth.updateUser({password})); if(error)throw error; }
+    catch(e){ if(isNetErr(e)){renderOffline(renderNewPassword);return;}
+      msg((e.message||'could not save the password').toLowerCase()); return; }
+    RECOVERING=false;
+    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+    toast('password changed — welcome back 🐻',4000); enterCloud(); }; }
+function renderLogin(signup,prefillEmail,note){
   if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
   loginCard(`<h1>Bear Family Tree</h1>
     ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`
@@ -1421,25 +1526,29 @@ function renderLogin(signup,prefillEmail){
       <div class="fld" style="text-align:left;"><span class="flabel">Password</span>${signup
         ?'<input id="au_newpass" name="new-password" type="password" autocomplete="new-password">'
         :'<input id="au_pass" name="password" type="password" autocomplete="current-password">'}</div>
-      <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
+      <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;">${esc(note||'')}</div>
       <button type="submit" class="btn primary" style="width:100%;" id="${signup?'au_up':'au_in'}">${signup?'Create account':'Sign in'}</button>
     </form>
+    ${signup?'':'<button class="link" id="au_forgot" style="margin-top:12px;display:block;margin-left:auto;margin-right:auto;">forgot password?</button>'}
     <button class="link" id="au_sw" style="margin-top:12px;">${signup?'already have an account? sign in':'new here? create an account'}</button>
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
   const msg=t=>{document.getElementById('au_msg').textContent=t;};
   const creds=()=>({email:document.getElementById('au_email').value.trim(),
                     password:(document.getElementById(signup?'au_newpass':'au_pass')||{}).value||''});
-  const doIn=async()=>{ if(!sb)return;
+  const back=email=>()=>renderLogin(signup,email);
+  const doIn=async()=>{ if(!sb){renderOffline();return;}
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     msg('signing in…');
-    const {error}=await sb.auth.signInWithPassword(c);
+    let error; try{ ({error}=await withTimeout(sb.auth.signInWithPassword(c))); }catch(e){ error=e; }
+    if(error&&isNetErr(error)){renderOffline(back(c.email));return;}
     if(error)msg((error.message||'sign-in failed').toLowerCase()); else enterCloud(); };
-  const doUp=async()=>{ if(!sb)return;
+  const doUp=async()=>{ if(!sb){renderOffline();return;}
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     if(c.password.length<6){msg('password needs at least 6 characters');return;}
     msg('creating account…');
-    const {data,error}=await sb.auth.signUp(c);
+    let data,error; try{ ({data,error}=await withTimeout(sb.auth.signUp(c))); }catch(e){ error=e; }
+    if(error&&isNetErr(error)){renderOffline(back(c.email));return;}
     if(error)msg((error.message||'sign-up failed').toLowerCase());
     else if(!data.session)msg('account created — check your email to confirm, then sign in');
     else enterCloud(); };
@@ -1451,13 +1560,14 @@ function renderLogin(signup,prefillEmail){
       const b=document.getElementById('inv_banner');
       if(b&&data)b.textContent=data+", you're invited to join Bear Family Tree! 🐻"; }).catch(()=>{}); }
   document.getElementById('au_sw').onclick=()=>renderLogin(!signup,creds().email);
-  document.getElementById('au_demo').onclick=()=>{ MODE='demo'; load();
+  const fg=document.getElementById('au_forgot'); if(fg)fg.onclick=()=>renderForgot(creds().email);
+  document.getElementById('au_demo').onclick=()=>{ MODE='demo'; DEMO_CHOSEN=true; load();
     if(S.session)enterApp(); else renderDemoLogin(); }; }
 function renderDemoLogin(){ const el=document.getElementById('login');
   const houses=Object.values(S.nuclei).map(n=>{
     const mem=nucleusMembers(n.id);
-    return `<button class="choice" data-n="${n.id}"><span class="itile">${(n.label[0]||'?').toUpperCase()}</span>
-      <span>${esc(n.label)}<span class="sub">${mem.map(m=>person(m).name.split(' ')[0]).join(', ')||'no members yet'} · "${esc(n.treeName)}"</span></span></button>`; }).join('');
+    return `<button class="choice" data-n="${n.id}"><span class="itile">${esc((n.label[0]||'?').toUpperCase())}</span>
+      <span>${esc(n.label)}<span class="sub">${esc(mem.map(m=>person(m).name.split(' ')[0]).join(', ')||'no members yet')} · "${esc(n.treeName)}"</span></span></button>`; }).join('');
   loginCard(`<h1>Local demo</h1>
     <div class="cap">pick a household — data stays in this browser only</div>
     ${houses}`);
@@ -1468,10 +1578,15 @@ function renderDemoLogin(){ const el=document.getElementById('login');
     else pickProfile(nid,mems); }); }
 async function enterCloud(){ MODE='cloud'; S=blankState();
   loginCard('<h1>Bear Family Tree</h1><div class="cap">loading your tree…</div>');
-  try{ const {data:{user}}=await sb.auth.getUser(); ME.userId=user.id; }
-  catch(e){ renderLogin(); return; }
+  let user=null;
+  try{ const {data,error}=await withTimeout(sb.auth.getUser());
+    if(error&&isNetErr(error))throw error; user=data&&data.user; }
+  catch(e){ renderOffline(enterCloud); return; }
+  if(!user){ MODE='demo'; renderLogin(false,'','please sign in again'); return; }
+  ME.userId=user.id;
   let ok; try{ ok=await cloudFetchAll(); }
-  catch(e){ loginCard(`<h1>hmm</h1><div class="cap">couldn't load your tree — ${esc((e&&e.message)||e)}</div>
+  catch(e){ if(isNetErr(e)){ renderOffline(enterCloud); return; }
+    loginCard(`<h1>hmm</h1><div class="cap">couldn't load your tree — ${esc((e&&e.message)||e)}</div>
     <button class="btn secondary" style="width:100%;" onclick="location.reload()">try again</button>`); return; }
   if(!ok){ if(PENDING_INVITE){ renderJoinInvited(PENDING_INVITE); return; }
     if(PENDING_NEWTREE){ renderStartTree(); return; }
@@ -1511,9 +1626,7 @@ function renderOnboarding(){
       const tn=document.getElementById('ob_tree').value.trim()||'our family';
       if(!code){document.getElementById('ob_msg').textContent='the invite code is needed';return;}
       document.getElementById('ob_msg').textContent='joining…';
-      let {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
-      if(error&&/find the function/i.test(error.message||'')){ // pre-upgrade fallback
-        ({error}=await sb.rpc('join_tree',{invite_code:code,nucleus_label:label,tree_nm:tn})); data=null; }
+      const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
       if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
       await cloudFetchAll();
       if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);
@@ -1589,7 +1702,7 @@ function renderWhoAreYou(){
 function pickProfile(nid,mems){ const el=document.getElementById('login');
   el.querySelector('.card').innerHTML=`<div class="bear">🐻</div>
     <h1>Who's looking?</h1><div class="cap">nicknames are personal — pick yourself</div>
-    ${mems.map(m=>`<button class="choice" data-p="${m}"><span class="itile">${person(m).name.split(' ').map(w=>w[0]).slice(0,2).join('')}</span>
+    ${mems.map(m=>`<button class="choice" data-p="${m}"><span class="itile">${esc(person(m).name.split(' ').map(w=>w[0]).slice(0,2).join(''))}</span>
       <span>${esc(person(m).name)}</span></button>`).join('')}`;
   el.querySelectorAll('.choice').forEach(b=>b.onclick=()=>startSession(nid,b.dataset.p)); }
 function startSession(nid,pid){ S.session={nucleusId:nid,viewingAs:pid};
@@ -1613,19 +1726,31 @@ function enterApp(){
   if(MODE==='cloud'){ subscribeRealtime(); stampSeen(); }
   document.getElementById('adminBtn').style.display=isSuper()?'flex':'none';
   try{ if(!localStorage.getItem(tutKey()))setTimeout(()=>openTutorial(true),600); }catch(e){} }
-const IDLE_MS=3*24*60*60*1000; // 3 quiet days → signed out
+const IDLE_DAYS=30;                     // signed out after this many quiet days (Aizat's call — change the number)
+const IDLE_MS=IDLE_DAYS*24*60*60*1000;
 function stampSeen(){ if(MODE==='cloud'&&ME.userId)
   try{ localStorage.setItem('bft.lastSeen.'+ME.userId,String(Date.now())); }catch(e){} }
 async function boot(){ S=blankState();
-  renderLogin(); // always paint immediately — never gate first paint on the network
-  if(sb){ try{ const {data}=await Promise.race([ sb.auth.getSession(),
+  if(sb)sb.auth.onAuthStateChange(ev=>{
+    if(ev==='PASSWORD_RECOVERY'){ if(!document.getElementById('np_form'))renderNewPassword(); }
+    else if(ev==='SIGNED_OUT'&&MODE==='cloud'){ // the sign-in ended elsewhere (expired, revoked)
+      MODE='demo'; renderLogin(false,'','you were signed out — please sign in again'); } });
+  const STALE_LINK='that reset link has expired or was already used — tap "forgot password?" for a fresh one';
+  if(RESET_EXPIRED)try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+  renderLogin(undefined,'',RESET_EXPIRED?STALE_LINK:''); // always paint immediately — never gate first paint on the network
+  if(sb){ try{ const {data,error}=await Promise.race([ sb.auth.getSession(),
       new Promise(res=>setTimeout(()=>res({data:{session:null}}),4000)) ]);
-    if(data&&data.session&&MODE!=='demo'){
+    if(error&&isNetErr(error)&&!DEMO_CHOSEN&&MODE!=='cloud'){ renderOffline(); return; }
+    if(RECOVERING){ if(data&&data.session){ if(!document.getElementById('np_form'))renderNewPassword(); }
+      else renderLogin(false,'',STALE_LINK);
+      return; }
+    // resume the saved sign-in, unless someone already chose the demo or signed in by hand
+    if(data&&data.session&&!DEMO_CHOSEN&&MODE!=='cloud'){
       const uid=data.session.user&&data.session.user.id;
       let last=0; try{ last=parseInt(localStorage.getItem('bft.lastSeen.'+uid)||'0',10); }catch(e){}
       if(uid&&last&&Date.now()-last>IDLE_MS){ // away too long — sign out
         try{ localStorage.removeItem('bft.lastSeen.'+uid); await sb.auth.signOut(); }catch(e){}
-        renderLogin(); toast("signed out — it's been a few quiet days 🐻");
+        renderLogin(); toast("signed out — it's been a while since your last visit 🐻",4000);
         return; }
       enterCloud(); } }catch(e){} } }
 boot();
