@@ -64,7 +64,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
 #results button{display:flex;width:100%;text-align:left;gap:10px;align-items:center;
   padding:8px 10px;border-radius:12px;font-size:13px;}
 #results button:hover{background:var(--field);}
-#results .rn{font-weight:500;} #results .rf{font-size:11px;color:var(--ink-soft);}
+#results .rn{font-weight:500;white-space:nowrap;} #results .rf{font-size:11px;color:var(--ink-soft);}
 
 /* ---------- canvas ---------- */
 #viewport{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab;}
@@ -136,6 +136,9 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .bignick input{flex:1;background:#fff;border:0;outline:0;border-radius:12px;padding:8px 14px;
   font-size:20px;font-weight:600;color:var(--primary);min-width:0;}
 .bignick input:focus{box-shadow:0 0 0 2px var(--accent);}
+.onlyus{display:inline-flex;align-items:center;gap:6px;margin:10px 0 2px;font-size:14px;font-weight:500;cursor:pointer;}
+.onlyus input{width:18px;height:18px;margin:0;accent-color:var(--primary);}
+.node .nick .lock{font-size:9px;margin-left:3px;vertical-align:1px;}
 .link{color:var(--primary);font-size:13px;font-weight:500;cursor:pointer;}
 .btnrow{display:flex;gap:10px;margin-top:14px;}
 .btn{flex:1;height:46px;border-radius:999px;display:flex;align-items:center;justify-content:center;
@@ -312,16 +315,17 @@ function seed(){
     atok:{granny:'Yang'},
     farid:{atok:'Pak Cik Mad',granny:'Opah',aizat:'Abang Long',paklong:'Ayah'},
     dina:{granny:'Opah',aizat:'Abang Long'}};
+  const nickPriv={aizat:{sarah:true}}; // "only us" — just Aizat and Sarah see "Sayang"
   const nuclei={
     n1:{id:'n1',treeName:'BearFamily',label:"Aizat & Sarah's household"},
     n2:{id:'n2',treeName:'Keluarga Taha',label:'Atok & Granny'},
     n3:{id:'n3',treeName:'my family',label:'Kak Ina'},
     n4:{id:'n4',treeName:'FAM',label:"Baba & Mama's household"}};
-  return {persons,rels,nicknames,nuclei,session:null,history:[],active:[]};
+  return {persons,rels,nicknames,nickPriv,nuclei,session:null,history:[],active:[]};
 }
 let S=null;
-function blankState(){ return {persons:{},rels:[],nicknames:{},nuclei:{},session:null,history:[],active:[]}; }
-function load(){ try{ const raw=localStorage.getItem(LS_KEY); if(raw){S=JSON.parse(raw);return;} }catch(e){}
+function blankState(){ return {persons:{},rels:[],nicknames:{},nickPriv:{},nuclei:{},session:null,history:[],active:[]}; }
+function load(){ try{ const raw=localStorage.getItem(LS_KEY); if(raw){S=JSON.parse(raw);S.nickPriv=S.nickPriv||{};return;} }catch(e){}
   S=seed(); save(); }
 function save(){
   if(MODE==='cloud'){ // shared data write-through happens per mutation; only
@@ -362,8 +366,10 @@ async function cloudFetchAll(){
   // a link to someone removed (or half-removed) must never blank the tree
   S.rels=rel.data.filter(r=>S.persons[r.person_a]&&S.persons[r.person_b]).map(r=>({id:r.id,kind:r.kind==='partner'?'pt':'pc',a:r.person_a,b:r.person_b,
     status:r.status||'together',ended:r.ended||undefined}));
-  S.nicknames={}; nick.data.forEach(n=>{
-    (S.nicknames[n.viewer_person_id]=S.nicknames[n.viewer_person_id]||{})[n.person_id]=n.text; });
+  // private rows arrive only for the two households involved — the database filters the rest
+  S.nicknames={}; S.nickPriv={}; nick.data.forEach(n=>{
+    (S.nicknames[n.viewer_person_id]=S.nicknames[n.viewer_person_id]||{})[n.person_id]=n.text;
+    if(n.private)(S.nickPriv[n.viewer_person_id]=S.nickPriv[n.viewer_person_id]||{})[n.person_id]=true; });
   return true; }
 // "can't reach Supabase" looks different in every browser — one test for all of them
 const isNetErr=e=>!!e&&(e.name==='AuthRetryableFetchError'||
@@ -381,9 +387,9 @@ async function attempt(fn){ if(!db.on())return true;
 const db={
   on:()=>MODE==='cloud',
   // every write resolves true (saved) or false (refused — the person has been told)
-  upsertNick(viewer,pid,text,had){ return attempt(async()=>{
+  upsertNick(viewer,pid,text,had,priv){ return attempt(async()=>{
     if(text)await wrote(sb.from('nickname').upsert(
-      {tree_id:ME.treeId,person_id:pid,viewer_person_id:viewer,text},
+      {tree_id:ME.treeId,person_id:pid,viewer_person_id:viewer,text,private:!!priv},
       {onConflict:'person_id,viewer_person_id'}));
     else if(had)await wrote(sb.from('nickname').delete()
       .match({person_id:pid,viewer_person_id:viewer})); }); },
@@ -424,7 +430,7 @@ const db={
     .select('code').single(); if(error){dbErr(error);return null;} return data.code; } };
 let refetchT=null;
 function scheduleRefetch(){ if(MODE!=='cloud')return; stampSeen(); clearTimeout(refetchT);
-  refetchT=setTimeout(async()=>{ try{ await cloudFetchAll(); rebuild(); }catch(e){} },1200); }
+  refetchT=setTimeout(async()=>{ try{ await cloudFetchAll(); rebuild(); refreshViewingBtn(); }catch(e){} },1200); }
 window.addEventListener('focus',scheduleRefetch);
 function subscribeRealtime(){ if(!sb||MODE!=='cloud')return;
   try{ sb.channel('bft').on('postgres_changes',{event:'*',schema:'public'},scheduleRefetch).subscribe(); }catch(e){} }
@@ -468,6 +474,21 @@ const viewing=()=>S.session.viewingAs;
 function nickFor(pid){ return (S.nicknames[viewing()]||{})[pid]||''; }
 function displayName(pid){ const per=person(pid);
   return nickFor(pid)||(per?per.name.split(' ')[0]:'?'); }
+// the name someone chose for themselves ("You go by"), else their first name
+function goesBy(pid){ const per=person(pid);
+  return (S.nicknames[pid]||{})[pid]||(per?per.name.split(' ')[0]:'?'); }
+function refreshViewingBtn(){ const b=document.getElementById('viewingBtn');
+  if(b&&S.session&&person(viewing()))b.textContent='viewing as '+goesBy(viewing()); }
+// "only us": a private nickname is shown only to the person who set it and the
+// person it names (the database already keeps it from every other household)
+const isPrivNick=(v,pid)=>!!((S.nickPriv||{})[v]||{})[pid];
+const canSeeNick=(v,pid)=>!isPrivNick(v,pid)||viewing()===v||viewing()===pid;
+// whose names for someone are worth showing: me and my close family + first cousins
+function closeCircle(me){ const par=parentsOf(me);
+  return new Set([me,...par,...siblingsOf(me),...childrenOf(me),
+    ...partnersOf(me).filter(x=>isCurrent(relStatus(me,x))),
+    ...par.flatMap(parentsOf),                              // grandparents
+    ...par.flatMap(siblingsOf).flatMap(childrenOf)]); }     // first cousins
 function flagEmoji(cc){ if(!cc)return ''; return cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt(0))); }
 function fmtDate(d){ if(!d)return ''; if(/^\d{4}$/.test(d))return d;
   const dt=new Date(d+'T00:00:00'); if(isNaN(dt))return d;
@@ -812,7 +833,7 @@ function rebuild(origin){
     let inner=`<button class="addfab" data-add="${pid}" title="add relative">＋</button>
       <div class="avatar">${faceHtml(per)}
         ${(!passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>
-      <div class="nick">${esc(nick)}</div><div class="full">${esc(per.name)}</div>
+      <div class="nick">${esc(nick)}${isPrivNick(viewing(),pid)?'<span class="lock" title="only us">🔒</span>':''}</div><div class="full">${esc(per.name)}</div>
       ${passed?`<div class="passedon">${esc(memorialLine(per))}</div>`:''}
       ${isYou?'<span class="youchip">you</span>':''}`;
     // chips live inside the node so they travel with it
@@ -1063,12 +1084,25 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
   const claimedLabel=per.claimedBy
     ?`✓ claimed — ${esc(S.nuclei[per.claimedBy]?.label||'a nucleus')}`
     :`unverified · cared for by family within 5 branches`;
-  const nicksHtml=Object.entries(S.nicknames).filter(([v,map])=>map[pid])
-    .map(([v,map])=>({n:map[pid],who:v===viewing()?'you':esc(displayName(v)||person(v)?.name||v)}))
-    .reduce((acc,x)=>{ (acc[x.n]=acc[x.n]||[]).push(x.who); return acc; },{});
-  const akaRows=Object.entries(nicksHtml).map(([n,whos])=>
+  // "Also known as": the name they go by, plus names from MY close family —
+  // everyone else's names are only counted, so the list stays relatable
+  const me=viewing(), circle=closeCircle(me), shown={}, wider=new Set();
+  Object.entries(S.nicknames).filter(([v,map])=>map[pid]&&canSeeNick(v,pid))
+    .sort(([a],[b])=>(b===pid)-(a===pid))           // their own choice first
+    .forEach(([v,map])=>{ const n=map[pid];
+      if(v!==pid&&!circle.has(v)){ wider.add(n); return; }
+      const who=v===pid?'what they go by':v===me?'you':displayName(v);
+      (shown[n]=shown[n]||[]).push(esc(who)+(isPrivNick(v,pid)?' 🔒':'')); });
+  const more=[...wider].filter(n=>!shown[n]).length;
+  const akaRows=(Object.entries(shown).map(([n,whos])=>
     `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.join(', ')}</span></div>`).join('')
-    ||'<div class="cap2">no nicknames yet</div>';
+    ||`<div class="cap2">${more?'none from your close family yet':'no nicknames yet'}</div>`)
+    +(more?`<div class="cap2" style="margin-top:6px;">+ ${more} more name${more===1?'':'s'} used in the wider family</div>`:'');
+  const theirs=goesBy(pid), privNote=!isPrivNick(me,pid)?'off — everyone in the family tree can see this name'
+    :!per.claimedBy
+    ?`only you can see this for now — and ${esc(theirs)}, once they join the tree`
+    :per.claimedBy===S.session.nucleusId?`only you and ${esc(theirs)} can see this`
+    :`only you and ${esc(theirs)}'s household can see this`;
   const facts=[relationLabel(pid), per.born?('b. '+per.born):null,
     per.passed?null:(per.country?('lives in '+ (COUNTRIES.find(c=>c[0]===per.country)?.[1]||per.country)+' '+flagEmoji(per.country)):null)]
     .filter(Boolean).join(' · ');
@@ -1082,7 +1116,9 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     ${!per.claimedBy&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="invitePerson('${pid}')">✉ invite ${esc(displayName(pid))} to claim this profile</button>`:''}
     <div class="card"><div class="label">You call ${per.passed?'them':'them'}</div>
       <div class="bignick"><input id="mynick" value="${esc(nickFor(pid))}" placeholder="${esc(per.name.split(' ')[0])}">
-        <button class="link" onclick="saveNick('${pid}')">save</button></div></div>
+        <button class="link" onclick="saveNick('${pid}')">save</button></div>
+      <label class="onlyus"><input type="checkbox" id="mynick_priv" ${isPrivNick(me,pid)?'checked':''} onchange="privToggled('${pid}')"> 🔒 only us</label>
+      <div class="cap2">${privNote}</div></div>
     <div class="card"><div class="label">Also known as</div>${akaRows}</div>
     ${partnersCardHtml(pid)}
     ${childrenCardHtml(pid)}
@@ -1164,13 +1200,21 @@ document.getElementById('fileinput').addEventListener('change',e=>{
     if(!await db.savePerson(per)){ per.photos=was.photos; per.mainPhoto=was.mainPhoto; undone(pid); } };
   img.src=url; });
 window.saveNick=async(pid)=>{ const v=document.getElementById('mynick').value.trim(), me=viewing();
+  const box=document.getElementById('mynick_priv'), priv=!!(v&&box&&box.checked&&pid!==me);
   if(!S.nicknames[me])S.nicknames[me]={};
-  const was=S.nicknames[me][pid];
-  if(v)S.nicknames[me][pid]=v; else delete S.nicknames[me][pid];
-  save(); rebuild(); toast(v?`saved — you call them ${v}`:'nickname removed');
-  if(!await db.upsertNick(me,pid,v,was!==undefined)){
-    if(was!==undefined)S.nicknames[me][pid]=was; else delete S.nicknames[me][pid];
-    undone(pid); } };
+  if(!S.nickPriv)S.nickPriv={}; if(!S.nickPriv[me])S.nickPriv[me]={};
+  const was=S.nicknames[me][pid], wasPriv=isPrivNick(me,pid);
+  const put=(t,p)=>{ if(t)S.nicknames[me][pid]=t; else delete S.nicknames[me][pid];
+    if(p)S.nickPriv[me][pid]=true; else delete S.nickPriv[me][pid]; };
+  put(v,priv);
+  save(); rebuild(); refreshViewingBtn(); refreshSheet(pid);
+  toast(!v?'nickname removed':pid===me?`saved — you go by ${v}`
+    :`saved — you call them ${v}`+(priv?' 🔒 only us':''));
+  if(!await db.upsertNick(me,pid,v,was!==undefined,priv)){
+    put(was,wasPriv); refreshViewingBtn(); undone(pid); } };
+// flipping "only us" saves straight away — there's nothing to keep private until a name is typed
+window.privToggled=pid=>{ if(document.getElementById('mynick').value.trim())saveNick(pid);
+  else toast('type the name you call them first, then save'); };
 window.deletePersonUI=async(pid)=>{ const per=person(pid); if(!per||pid===viewing())return;
   if(!confirm(`Remove ${per.name} from the tree?\n\nTheir links to everyone disappear too — photos and details go with them. Children they have keep their other parent.`))return;
   const links=S.rels.filter(r=>r.a===pid||r.b===pid), nicks={}, own=S.nicknames[pid];
@@ -1274,11 +1318,16 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
 function openSelf(){ const per=person(viewing());
   const nuc=S.nuclei[S.session.nucleusId];
   const members=nucleusMembers(S.session.nucleusId).filter(p=>p!==viewing()).map(displayName).join(', ')||'just you';
-  const calls=Object.entries(S.nicknames).filter(([v,map])=>v!==viewing()&&map[viewing()])
-    .reduce((acc,[v,map])=>{ const n=map[viewing()]; (acc[n]=acc[n]||[]).push(displayName(v)); return acc; },{});
-  const rows=Object.entries(calls).map(([n,whos])=>
-    `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.map(esc).join(', ')}</span></div>`).join('')
-    ||'<div class="cap2">nobody has set a nickname for you yet</div>';
+  // your own card keeps the FULL list — everyone's names for you, private ones included
+  const me=viewing();
+  const calls=Object.entries(S.nicknames).filter(([v,map])=>v!==me&&map[me]&&canSeeNick(v,me))
+    .reduce((acc,[v,map])=>{ const n=map[me];
+      (acc[n]=acc[n]||[]).push(esc(displayName(v))+(isPrivNick(v,me)?' 🔒':'')); return acc; },{});
+  const anyPriv=Object.keys(S.nicknames).some(v=>v!==me&&isPrivNick(v,me)&&S.nicknames[v][me]);
+  const rows=(Object.entries(calls).map(([n,whos])=>
+    `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.join(', ')}</span></div>`).join('')
+    ||'<div class="cap2">nobody has set a nickname for you yet</div>')
+    +(anyPriv?'<div class="cap2" style="margin-top:6px;">🔒 = only us — just you and the person who calls you that can see it</div>':'');
   const editable=canEditPerson(viewing());
   openSheet(`
     <div class="profile">${avatarHtml(per)}
@@ -1286,7 +1335,7 @@ function openSelf(){ const per=person(viewing());
     <div class="card"><div class="label">You go by</div>
       <div class="bignick"><input id="mynick" value="${esc(nickFor(viewing()))}" placeholder="${esc(per.name.split(' ')[0])}">
         <button class="link" onclick="saveNick('${viewing()}')">save</button></div>
-      <div class="cap2" style="margin-top:4px;">the name shown big on your own node</div></div>
+      <div class="cap2" style="margin-top:4px;">the name shown big on your own node and in "viewing as"</div></div>
     <div class="card"><div class="label">What people call you</div>${rows}</div>
     ${partnersCardHtml(viewing())}
     ${childrenCardHtml(viewing())}
@@ -1433,7 +1482,7 @@ searchEl.addEventListener('input',()=>{ const q=searchEl.value.trim().toLowerCas
   const hits=Object.values(S.persons).filter(p=>
     p.name.toLowerCase().includes(q)||(nickFor(p.id)||'').toLowerCase().includes(q)).slice(0,8);
   resultsEl.innerHTML=hits.map(p=>`<button data-pid="${p.id}">
-    <span class="rn">${esc(nickFor(p.id)||p.name.split(' ')[0])}</span>
+    <span class="rn">${esc(nickFor(p.id)||p.name.split(' ')[0])}${isPrivNick(viewing(),p.id)?' 🔒':''}</span>
     <span class="rf">${esc(p.name)}</span></button>`).join('')||'<div class="cap2" style="padding:8px 12px;">no match</div>';
   resultsEl.style.display='block'; });
 resultsEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
@@ -1567,7 +1616,7 @@ function renderDemoLogin(){ const el=document.getElementById('login');
   const houses=Object.values(S.nuclei).map(n=>{
     const mem=nucleusMembers(n.id);
     return `<button class="choice" data-n="${n.id}"><span class="itile">${esc((n.label[0]||'?').toUpperCase())}</span>
-      <span>${esc(n.label)}<span class="sub">${esc(mem.map(m=>person(m).name.split(' ')[0]).join(', ')||'no members yet')} · "${esc(n.treeName)}"</span></span></button>`; }).join('');
+      <span>${esc(n.label)}<span class="sub">${esc(mem.map(goesBy).join(', ')||'no members yet')} · "${esc(n.treeName)}"</span></span></button>`; }).join('');
   loginCard(`<h1>Local demo</h1>
     <div class="cap">pick a household — data stays in this browser only</div>
     ${houses}`);
@@ -1712,16 +1761,16 @@ document.getElementById('viewingBtn').onclick=()=>{
   if(mems.length<2){toast('only you on this login');return;}
   const i=(mems.indexOf(viewing())+1)%mems.length;
   S.session.viewingAs=mems[i]; S.history=[];S.active=[]; ensureDefaults(); save();
-  document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
+  refreshViewingBtn();
   closeSheet(); rebuild(); centerOn(viewing()); lastFocusLabel=''; updateFocusBar();
-  toast('viewing as '+person(viewing()).name.split(' ')[0]); };
+  toast('viewing as '+goesBy(viewing())); };
 
 /* ================= boot ================= */
 function enterApp(){
   document.getElementById('login').style.display='none';
   document.getElementById('app').style.display='flex';
   document.getElementById('treename').textContent=S.nuclei[S.session.nucleusId].treeName;
-  document.getElementById('viewingBtn').textContent='viewing as '+person(viewing()).name.split(' ')[0];
+  refreshViewingBtn();
   rebuild(); view.s=1; centerOn(viewing()); updateFocusBar();
   if(MODE==='cloud'){ subscribeRealtime(); stampSeen(); }
   document.getElementById('adminBtn').style.display=isSuper()?'flex':'none';
