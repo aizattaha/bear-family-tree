@@ -472,8 +472,8 @@ function canEditMemorial(pid){ return isSuper()||branchDistance(pid)<=5; }
 /* ================= names / display ================= */
 const viewing=()=>S.session.viewingAs;
 function nickFor(pid){ return (S.nicknames[viewing()]||{})[pid]||''; }
-function displayName(pid){ const per=person(pid);
-  return nickFor(pid)||(per?per.name.split(' ')[0]:'?'); }
+// what I call them; if I haven't named them, the name they go by
+function displayName(pid){ return nickFor(pid)||goesBy(pid); }
 // the name someone chose for themselves ("You go by"), else their first name
 function goesBy(pid){ const per=person(pid);
   return (S.nicknames[pid]||{})[pid]||(per?per.name.split(' ')[0]:'?'); }
@@ -829,7 +829,7 @@ function rebuild(origin){
   for(const pid of vis){ const p=pos[pid]; if(!p)continue; seen.add(pid);
     const per=person(pid); const isYou=pid===viewing();
     const passed=!!per.passed;
-    const nick=nickFor(pid)||per.name.split(' ')[0];
+    const nick=displayName(pid);
     let inner=`<button class="addfab" data-add="${pid}" title="add relative">＋</button>
       <div class="avatar">${faceHtml(per)}
         ${(!passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>
@@ -1115,7 +1115,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     ${!per.claimedBy?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="claimPerson('${pid}')">claim — this is me / in my nucleus</button>`:''}
     ${!per.claimedBy&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="invitePerson('${pid}')">✉ invite ${esc(displayName(pid))} to claim this profile</button>`:''}
     <div class="card"><div class="label">You call ${per.passed?'them':'them'}</div>
-      <div class="bignick"><input id="mynick" value="${esc(nickFor(pid))}" placeholder="${esc(per.name.split(' ')[0])}">
+      <div class="bignick"><input id="mynick" value="${esc(nickFor(pid))}" placeholder="${esc(goesBy(pid))}">
         <button class="link" onclick="saveNick('${pid}')">save</button></div>
       <label class="onlyus"><input type="checkbox" id="mynick_priv" ${isPrivNick(me,pid)?'checked':''} onchange="privToggled('${pid}')"> 🔒 only us</label>
       <div class="cap2">${privNote}</div></div>
@@ -1480,9 +1480,9 @@ const searchEl=document.getElementById('search'), resultsEl=document.getElementB
 searchEl.addEventListener('input',()=>{ const q=searchEl.value.trim().toLowerCase();
   if(!q){resultsEl.style.display='none';return;}
   const hits=Object.values(S.persons).filter(p=>
-    p.name.toLowerCase().includes(q)||(nickFor(p.id)||'').toLowerCase().includes(q)).slice(0,8);
+    p.name.toLowerCase().includes(q)||displayName(p.id).toLowerCase().includes(q)).slice(0,8);
   resultsEl.innerHTML=hits.map(p=>`<button data-pid="${p.id}">
-    <span class="rn">${esc(nickFor(p.id)||p.name.split(' ')[0])}${isPrivNick(viewing(),p.id)?' 🔒':''}</span>
+    <span class="rn">${esc(displayName(p.id))}${isPrivNick(viewing(),p.id)?' 🔒':''}</span>
     <span class="rf">${esc(p.name)}</span></button>`).join('')||'<div class="cap2" style="padding:8px 12px;">no match</div>';
   resultsEl.style.display='block'; });
 resultsEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
