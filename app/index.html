@@ -430,7 +430,10 @@ const db={
     .select('code').single(); if(error){dbErr(error);return null;} return data.code; } };
 let refetchT=null;
 function scheduleRefetch(){ if(MODE!=='cloud')return; stampSeen(); clearTimeout(refetchT);
-  refetchT=setTimeout(async()=>{ try{ await cloudFetchAll(); rebuild(); refreshViewingBtn(); }catch(e){} },1200); }
+  refetchT=setTimeout(async()=>{
+    // a refresh that reads while a nickname save is still on its way would bring back the old 🔒
+    if(nickBusy){ scheduleRefetch(); return; }
+    try{ await cloudFetchAll(); rebuild(); refreshViewingBtn(); syncOpenNick(); }catch(e){} },1200); }
 window.addEventListener('focus',scheduleRefetch);
 function subscribeRealtime(){ if(!sb||MODE!=='cloud')return;
   try{ sb.channel('bft').on('postgres_changes',{event:'*',schema:'public'},scheduleRefetch).subscribe(); }catch(e){} }
@@ -1199,22 +1202,36 @@ document.getElementById('fileinput').addEventListener('change',e=>{
     save(); rebuild(); openPerson(pid); toast('photo saved'); URL.revokeObjectURL(url);
     if(!await db.savePerson(per)){ per.photos=was.photos; per.mainPhoto=was.mainPhoto; undone(pid); } };
   img.src=url; });
+// nickname saves go out one at a time, in the order they were made — a quick
+// tick-then-untick must never land on the server the other way round
+let nickQ=Promise.resolve(), nickBusy=0;
 window.saveNick=async(pid)=>{ const v=document.getElementById('mynick').value.trim(), me=viewing();
   const box=document.getElementById('mynick_priv'), priv=!!(v&&box&&box.checked&&pid!==me);
-  if(!S.nicknames[me])S.nicknames[me]={};
-  if(!S.nickPriv)S.nickPriv={}; if(!S.nickPriv[me])S.nickPriv[me]={};
-  const was=S.nicknames[me][pid], wasPriv=isPrivNick(me,pid);
-  const put=(t,p)=>{ if(t)S.nicknames[me][pid]=t; else delete S.nicknames[me][pid];
-    if(p)S.nickPriv[me][pid]=true; else delete S.nickPriv[me][pid]; };
+  if(!S.nickPriv)S.nickPriv={};
+  const was=(S.nicknames[me]||{})[pid], wasPriv=isPrivNick(me,pid);
+  // a background refresh may swap these maps mid-save, so look them up each time
+  const put=(t,p)=>{ const n=S.nicknames[me]=S.nicknames[me]||{}, q=S.nickPriv[me]=S.nickPriv[me]||{};
+    if(t)n[pid]=t; else delete n[pid];
+    if(p)q[pid]=true; else delete q[pid]; };
   put(v,priv);
   save(); rebuild(); refreshViewingBtn(); refreshSheet(pid);
   toast(!v?'nickname removed':pid===me?`saved — you go by ${v}`
     :`saved — you call them ${v}`+(priv?' 🔒 only us':''));
-  if(!await db.upsertNick(me,pid,v,was!==undefined,priv)){
-    put(was,wasPriv); refreshViewingBtn(); undone(pid); } };
-// flipping "only us" saves straight away — there's nothing to keep private until a name is typed
-window.privToggled=pid=>{ if(document.getElementById('mynick').value.trim())saveNick(pid);
-  else toast('type the name you call them first, then save'); };
+  nickBusy++;
+  const ok=await (nickQ=nickQ.then(()=>db.upsertNick(me,pid,v,was!==undefined,priv)));
+  nickBusy--;
+  if(!ok){ put(was,wasPriv); refreshViewingBtn(); undone(pid); } };
+// flipping "only us" saves straight away — there's nothing to keep private until a name is
+// typed, so an early tick is undone rather than left waiting to ride along on a later save
+window.privToggled=pid=>{ if(document.getElementById('mynick').value.trim()){ saveNick(pid); return; }
+  document.getElementById('mynick_priv').checked=false;
+  toast('type the name you call them first, then tick 🔒 only us'); };
+// after a background refresh, an open card must show the 🔒 the tree really has —
+// otherwise the next save of that name would send the old setting back
+function syncOpenNick(){ const box=document.getElementById('mynick_priv');
+  if(!box||!sheetPid||!sheet.classList.contains('open')||!person(sheetPid))return;
+  if(sheet.contains(document.activeElement))return; // don't redraw under someone typing
+  if(box.checked!==isPrivNick(viewing(),sheetPid))openPerson(sheetPid); }
 window.deletePersonUI=async(pid)=>{ const per=person(pid); if(!per||pid===viewing())return;
   if(!confirm(`Remove ${per.name} from the tree?\n\nTheir links to everyone disappear too — photos and details go with them. Children they have keep their other parent.`))return;
   const links=S.rels.filter(r=>r.a===pid||r.b===pid), nicks={}, own=S.nicknames[pid];
