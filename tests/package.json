@@ -1,0 +1,14 @@
+{
+  "name": "bear-family-tree-tests",
+  "private": true,
+  "type": "module",
+  "description": "Permission tests (local Supabase only) and a demo-mode smoke test",
+  "scripts": {
+    "permissions": "node permissions.mjs",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.117.3",
+    "playwright-core": "1.56.1"
+  }
+}
