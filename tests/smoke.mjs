@@ -225,6 +225,14 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
       await page.fill('#f_born', '1952');
       await page.click('#sheetbody button.btn.primary:has-text("Save")');
       check(`${L}: an empty name box keeps them "?" and still saves the rest`, await page.evaluate(() => S.persons.maklong.name === '?' && S.persons.maklong.born === '1952'));
+      // a dash means the same as "?" (Aizat uses both); a dash inside a real name doesn't
+      await page.waitForFunction(() => !document.getElementById('sheet').classList.contains('open'));
+      await page.evaluate(() => openPerson('maklong')); await sheetOpen(page);
+      await page.fill('#f_name', '-');
+      await page.click('#sheetbody button.btn.primary:has-text("Save")');
+      check(`${L}: "-" as the name is a placeholder too ("—", "--" as well; not "Ali-Hassan")`, await page.evaluate(() => S.persons.maklong.name === '-'
+        && isPlaceholder('maklong') && fullName('maklong') === "Pak Long's wife" && / unknown/.test(document.querySelector('.node[data-pid="maklong"]').className)
+        && ['\u2014', ' -- ', '\u2013', '?-'].every(n => UNKNOWN_NAME.test(n)) && !['Ali-Hassan', '-Ali', 'Ali'].some(n => UNKNOWN_NAME.test(n))));
       // someone who can't edit her (Baba, 6 branches away) just sees the label, in their own words
       const other = await page.evaluate(() => { const keep = S.session; S.session = { nucleusId: 'n4', viewingAs: 'baba' };
         openPerson('maklong'); const r = { h3: document.querySelector('#sheetbody h3').textContent, ask: !!document.getElementById('addname') };
