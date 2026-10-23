@@ -4,7 +4,8 @@
 //   2. "only us" nicknames (2026-10-21): the 33 original checks
 //   3. launch gate (2026-10-23): kinship, remove_person, release_claim, timestamps
 //   4. keeper reset codes (2026-10-24): who may make one, redeeming, real sign-in after, limits
-//   5. catalog: search_path + who may call which function, Finance leftovers gone
+//   5. placeholder names (2026-10-24): "?" people marked name_unknown, edit rules unchanged
+//   6. catalog: search_path + who may call which function, Finance leftovers gone
 // env: SUPABASE_URL, SUPABASE_KEY (publishable), DB_CONTAINER (the stack's db container)
 // usage: node permissions.mjs        (exit code 1 if anything fails)
 import { createClient } from '@supabase/supabase-js';
@@ -472,7 +473,38 @@ section = '[reset] ';
   check('…none of them got in, and the password is unchanged', r.data === 'locked' && !(await signIn(R.email, 'new-password-2')).error, r.data);
 }
 
-/* ============ 5. catalog: search_path + who may call what ============ */
+/* ============ 5. placeholder names (2026-10-24): "?" people, name_unknown ============ */
+section = '[names] ';
+const unk = id => sql(`select name_unknown from person where id='${id}'`).trim();
+const pQ = randomUUID();
+r = await B.from('person').insert({ id: pQ, tree_id: treeA, full_name: '?', gender: 'f' }).select('id');
+await B.from('relationship').insert({ tree_id: treeA, kind: 'partner', person_a: pB, person_b: pQ });
+check('a person added as "?" is marked name_unknown by the database', !r.error && unk(pQ) === 't', r.error?.message || unk(pQ));
+for (const [nm, want] of [['??', 't'], ['  Unknown ', 't'], ['UNKNOWN', 't'], ['', 't'], ['Siti Aminah', 'f'], ['?', 't'], ['Ali?', 'f'], ['Unknown Ali', 'f']]) {
+  r = await B.from('person').update({ full_name: nm }).eq('id', pQ).select('id');
+  check(`renamed to "${nm}" → name_unknown ${want === 't'}`, !r.error && r.data.length === 1 && unk(pQ) === want, r.error?.message || `rows=${r.data?.length} mark=${unk(pQ)}`);
+}
+r = await B.from('person').update({ full_name: '?', name_unknown: false }).eq('id', pQ).select('id');
+check('a client can\'t clear the mark while the name is still "?"', !r.error && unk(pQ) === 't', r.error?.message || unk(pQ));
+r = await B.from('person').update({ full_name: 'Siti', name_unknown: true }).eq('id', pQ).select('id');
+check('a client can\'t set the mark on a real name', !r.error && unk(pQ) === 'f', r.error?.message || unk(pQ));
+const pQ2 = randomUUID();
+r = await B.from('person').insert({ id: pQ2, tree_id: treeA, full_name: 'Ali', name_unknown: true }).select('id');
+check('…not when adding someone either', !r.error && unk(pQ2) === 'f', r.error?.message || unk(pQ2));
+// who may fill in a name is unchanged: a "?" 7 branches from B (below pFar) is out of B's reach
+const pQfar = randomUUID();
+await B.from('person').insert({ id: pQfar, tree_id: treeA, full_name: '?' });
+await B.from('relationship').insert({ tree_id: treeA, kind: 'parent-child', person_a: pFar, person_b: pQfar });
+r = await B.from('person').update({ full_name: 'Far Name' }).eq('id', pQfar).select('id');
+check('a member more than 5 branches away still can\'t fill in the name', !r.error && r.data.length === 0 && unk(pQfar) === 't', r.error?.message || `rows=${r.data?.length}`);
+r = await A.from('person').update({ full_name: 'Far Name' }).eq('id', pQfar).select('id');
+check('a tree keeper (super) can, and the mark clears', !r.error && r.data.length === 1 && unk(pQfar) === 'f', r.error?.message || `rows=${r.data?.length}`);
+r = await C.from('person').select('id,name_unknown').eq('id', pQ);
+check('another tree still sees nothing', !r.error && r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
+r = await anon.from('person').select('name_unknown').limit(1);
+check('signed-out visitors still read nothing', !!r.error || r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
+
+/* ============ 6. catalog: search_path + who may call what ============ */
 section = '[catalog] ';
 const rows = q => sql(q).trim().split('\n').filter(Boolean);
 // production's hand-made BearHaus Finance objects (stand-ins: tests/prod-finance-drift.sql) are removed by upgrade 8
@@ -506,6 +538,10 @@ r = await anon.from('person').select('id').limit(1);
 check('signed-out visitors still read no people', !!r.error || r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
 const trg = rows(`select tgname||':'||case when tgtype & 1 = 1 then 'row' else 'statement' end from pg_trigger where tgrelid='relationship'::regclass and not tgisinternal order by 1`).join(',');
 check('relationship triggers: 3 statement-level kinship triggers + per-row stamp', trg === 'relationship_added:statement,relationship_moved:statement,relationship_removed:statement,relationship_stamp:row', trg);
+const ptrg = rows(`select tgname||':'||case when tgtype & 1 = 1 then 'row' else 'statement' end from pg_trigger where tgrelid='person'::regclass and not tgisinternal order by 1`).join(',');
+check('person triggers: name_unknown mark + stamp, per row', ptrg === 'person_name_unknown:row,person_stamp:row', ptrg);
+check('mark_name_unknown is internal (nobody can call it directly)', rows(`select 1 from pg_proc p where proname='mark_name_unknown'
+  and (has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute'))`).length === 0);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
