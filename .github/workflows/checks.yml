@@ -1,0 +1,42 @@
+# Runs on every pull request: a throwaway Supabase with every migration (and
+# production's grants), the permission tests, and a demo-mode smoke test in
+# headless Chrome. main is protected: a change merges only when this is green.
+# Nothing here can reach the real family tree — it uses no secrets at all.
+name: Checks
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  checks:
+    name: database + app checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: tests/package-lock.json
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+      - name: Throwaway Supabase with every migration
+        run: bash tests/ci-stack.sh "$RUNNER_TEMP/stack"
+      - name: Install the test tools
+        working-directory: tests
+        run: npm ci
+      - name: Permission tests (local stack only)
+        working-directory: tests
+        run: node permissions.mjs
+      - name: Demo smoke test (desktop + 375px phone)
+        working-directory: tests
+        run: node smoke.mjs
+      - name: Stop the stack
+        if: always()
+        run: supabase stop --no-backup --workdir "$RUNNER_TEMP/stack" || true
