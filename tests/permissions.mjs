@@ -342,17 +342,22 @@ check('memorial: stamped with its author', !r.error && stamp('memorial', `person
 
 /* ============ 4. catalog: search_path + who may call what ============ */
 section = '[catalog] ';
-const FINANCE = `'check_invite','create_household_setup'`; // BearHaus Finance leftovers in production — not ours to change
 const rows = q => sql(q).trim().split('\n').filter(Boolean);
-const unpinned = rows(`select proname from pg_proc where pronamespace='public'::regnamespace and prosecdef and proname not in (${FINANCE})
+// production's hand-made BearHaus Finance objects (stand-ins: tests/prod-finance-drift.sql) are removed by upgrade 8
+const finance = rows(`select proname from pg_proc where pronamespace='public'::regnamespace and proname in ('check_invite','create_household_setup')
+  union all select 'beta_invites' where to_regclass('public.beta_invites') is not null`);
+check('the BearHaus Finance leftovers are gone (beta_invites, check_invite, create_household_setup)', finance.length === 0, finance.join(', '));
+r = await anon.rpc('check_invite', { p_code: 'TEST-ONE' });
+check('signed-out visitors can no longer call check_invite', !!r.error, r.error?.message || 'ran');
+const unpinned = rows(`select proname from pg_proc where pronamespace='public'::regnamespace and prosecdef
   and not exists (select 1 from unnest(coalesce(proconfig,'{}')) c where c like 'search_path=%')`);
 check('every SECURITY DEFINER function pins its search_path', unpinned.length === 0, unpinned.join(', '));
-const callable = role => rows(`select proname from pg_proc where pronamespace='public'::regnamespace and proname not in (${FINANCE})
+const callable = role => rows(`select proname from pg_proc where pronamespace='public'::regnamespace
   and has_function_privilege('${role}', oid, 'execute') order by 1`).join(',');
 check('signed-out visitors (anon) can call only invite_preview', callable('anon') === 'invite_preview', callable('anon'));
 const WANT = 'branch_distance,claim_person,create_tree,in_tree,invite_preview,is_super_user,join_with_invite,my_nucleus,release_claim,remove_person,set_super';
 check('signed-in users can call only what the app and the row rules need', callable('authenticated') === WANT, callable('authenticated'));
-const pub = rows(`select proname from pg_proc where pronamespace='public'::regnamespace and proname not in (${FINANCE})
+const pub = rows(`select proname from pg_proc where pronamespace='public'::regnamespace
   and exists (select 1 from aclexplode(coalesce(proacl, acldefault('f', proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE')`);
 check('no function is open to PUBLIC', pub.length === 0, pub.join(', '));
 for (const [fn, args] of [['create_tree', { nucleus_label: 'x', tree_nm: 'x' }], ['claim_person', { p: pA }], ['set_super', { target: nucA, flag: true }],

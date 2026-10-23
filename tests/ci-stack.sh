@@ -1,6 +1,7 @@
 #!/bin/bash
 # Starts a THROWAWAY local Supabase with every migration in supabase/migrations/,
-# production's grants mirrored first (tests/prod-grants.sql), then prints the
+# production's grants mirrored first (tests/prod-grants.sql) and production's
+# hand-made Finance objects (tests/prod-finance-drift.sql), then prints the
 # settings the tests need. Used by .github/workflows/checks.yml; runs on a Mac too.
 #   usage: bash tests/ci-stack.sh <empty folder> [port prefix, default 543]
 # Never points at production: it only ever starts containers on this machine.
@@ -25,6 +26,8 @@ site_url = "http://127.0.0.1:8865/"
 enable_confirmations = false
 EOF
 cp "$REPO/tests/prod-grants.sql" "$DIR/supabase/migrations/20260101000000_test_prod_grants.sql"
+# production's hand-made BearHaus Finance objects, so their clean-up migration is tested for real
+cp "$REPO/tests/prod-finance-drift.sql" "$DIR/supabase/migrations/20260720000000_test_finance_drift.sql"
 cp "$REPO"/supabase/migrations/*.sql "$DIR/supabase/migrations/"
 supabase start --workdir "$DIR" \
   -x realtime,storage-api,imgproxy,studio,edge-runtime,logflare,vector,supavisor,postgres-meta,mailpit
