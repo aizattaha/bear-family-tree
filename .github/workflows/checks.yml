@@ -1,6 +1,7 @@
-# Runs on every pull request: a throwaway Supabase with every migration (and
-# production's grants), the permission tests, and a demo-mode smoke test in
-# headless Chrome. main is protected: a change merges only when this is green.
+# Runs on every pull request: the release rules for database changes, a
+# throwaway Supabase with every migration (and production's grants), the
+# permission tests, and a demo-mode smoke test in headless Chrome. main is
+# protected: a change merges only when this is green.
 # Nothing here can reach the real family tree — it uses no secrets at all.
 name: Checks
 on:
@@ -18,6 +19,13 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # the rules below compare with main's history
+      - name: Migration rules (a merged migration is never edited; new ones sort last)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: origin/${{ github.base_ref }}
+        run: bash tests/migration-rules.sh "$BASE"
       - uses: actions/setup-node@v4
         with:
           node-version: 22

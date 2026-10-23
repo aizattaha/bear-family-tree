@@ -67,8 +67,22 @@ input,select,textarea{font:inherit;color:var(--ink);}
 #results button:hover{background:var(--field);}
 #results .rn{font-weight:500;white-space:nowrap;} #results .rf{font-size:11px;color:var(--ink-soft);}
 #results .rn.unknownname{font-weight:400;}
-/* phones: the search box is narrow, so its results use the screen's width (from its right edge) */
-@media (max-width:520px){ #results{left:auto;width:calc(100vw - 32px);} #results button{flex-wrap:wrap;row-gap:0;} }
+#menuBtn{display:none;}
+/* phones: ONE row — 🐻, search, who you're viewing as, ◎ and a ⋯ menu with the rest
+   (help, tutorial, keeper settings, rename); pinch zooms, so − / + go too. The search
+   results drop down across the whole bar */
+@media (max-width:600px){
+  #appbar{flex-wrap:nowrap;gap:8px;padding:8px 12px;position:relative;}
+  #appbar .bear{width:34px;height:34px;font-size:17px;border-radius:10px;}
+  #treename,#renameBtn,#zoomOut,#zoomIn,#tutBtn,#helpBtn,#adminBtn{display:none!important;}
+  #menuBtn{display:flex;font-size:18px;}
+  #searchwrap{min-width:0;position:static;}
+  #viewingBtn{max-width:100px;overflow:hidden;text-overflow:ellipsis;padding:7px 11px;flex:none;}
+  #viewingBtn .va,#homeBtn .me{display:none;}
+  #homeBtn{padding:7px 11px;flex:none;}
+  #results{left:12px;right:12px;top:calc(100% + 4px);}
+  #results button{flex-wrap:wrap;row-gap:0;}
+}
 
 /* ---------- canvas ---------- */
 #viewport{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab;}
@@ -221,13 +235,14 @@ a.btn{text-decoration:none;}
       <input id="search" placeholder="search the family…" autocomplete="off">
       <div id="results"></div>
     </div>
-    <button class="chip" id="viewingBtn">viewing as …</button>
+    <button class="chip" id="viewingBtn"><span class="va">viewing as </span>…</button>
     <button class="iconbtn" id="zoomOut">−</button>
     <button class="iconbtn" id="zoomIn">+</button>
-    <button class="chip" id="homeBtn">◎ me</button>
+    <button class="chip" id="homeBtn" aria-label="back to me">◎<span class="me"> me</span></button>
     <button class="iconbtn" id="tutBtn" title="tutorial">🎓</button>
     <button class="iconbtn" id="helpBtn" title="help" aria-label="help">?</button>
-    <button class="iconbtn" id="adminBtn" title="super settings" style="display:none;">⭐</button>
+    <button class="iconbtn" id="adminBtn" title="tree keeper settings" aria-label="tree keeper settings" style="display:none;">⭐</button>
+    <button class="iconbtn" id="menuBtn" title="more" aria-label="more: help, tutorial, settings">⋯</button>
   </div>
   <div id="viewport">
     <div id="world"><svg id="edges"></svg><div id="nodes"></div></div>
@@ -260,12 +275,12 @@ let sb=null; try{ sb=window.supabase?.createClient(SUPABASE_URL,SUPABASE_KEY,
 const APP_URL='https://aizattaha.github.io/bear-family-tree/'; // the family's home — invite links point here
 let MODE='demo';                       // 'cloud' after sign-in
 let DEMO_CHOSEN=false;                 // "try the local demo" clicked — don't resume a saved sign-in
-const ME={userId:null,nucleusId:null,treeId:null};
+const ME={userId:null,nucleusId:null,treeId:null,resets:[]};
 let PENDING_INVITE=null;               // #invite=CODE in the link → survives the sign-up dance
-let PENDING_NEWTREE=null;              // #newtree → a friend starting their OWN tree
-try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/);
+let PENDING_NEWTREE=null;              // #newtree=CODE → a friend starting their OWN tree (a keeper's one-time code)
+try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/), t=location.hash.match(/newtree(?:=([0-9a-fA-F]{12}))?/);
   if(m)localStorage.setItem('bft.pendingInvite',m[1]);
-  if(/newtree/.test(location.hash))localStorage.setItem('bft.pendingNewTree','1');
+  if(t)localStorage.setItem('bft.pendingNewTree',t[1]?t[1].toLowerCase():'1'); // '1': an old link without a code
   if(m||/newtree/.test(location.hash))
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
   PENDING_INVITE=localStorage.getItem('bft.pendingInvite');
@@ -357,7 +372,7 @@ function seed(){
     dina:{granny:'Opah',aizat:'Abang Long'}};
   const nickPriv={aizat:{sarah:true}}; // "only us" — just Aizat and Sarah see "Sayang"
   const nuclei={
-    n1:{id:'n1',treeName:'BearFamily',label:"Aizat & Sarah's household"},
+    n1:{id:'n1',treeName:'BearFamily',label:"Aizat & Sarah's household",isSuper:true},
     n2:{id:'n2',treeName:'Keluarga Taha',label:'Atok & Granny'},
     n3:{id:'n3',treeName:'my family',label:'Kak Ina'},
     n4:{id:'n4',treeName:'FAM',label:"Baba & Mama's household"}};
@@ -381,6 +396,10 @@ const MAIN2DB={k:'kid',t:'teen',a:'adult'}, DB2MAIN={kid:'k',teen:'t',adult:'a'}
 // photos are only ever images the app made itself — anything else is never put on the page
 const okPhoto=s=>typeof s==='string'&&/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/.test(s);
 const BORN_RE=/^\d{4}(-\d{2}-\d{2})?$/;
+// a clock time always says am or pm ("2:59 pm"), so it never reads like a countdown
+const timeOf=d=>{ const h=d.getHours(); return (h%12||12)+':'+String(d.getMinutes()).padStart(2,'0')+(h<12?' am':' pm'); };
+const dayOf=d=>d.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'});
+const minsLeft=d=>Math.max(1,Math.ceil((d-Date.now())/60000));
 function personFromRow(r){ const photos={};
   if(okPhoto(r.photo_kid))photos.k=r.photo_kid; if(okPhoto(r.photo_teen))photos.t=r.photo_teen;
   if(okPhoto(r.photo_adult))photos.a=r.photo_adult;
@@ -521,6 +540,12 @@ function siblingsOf(id){ const s=new Set();
   parentsOf(id).forEach(p=>childrenOf(p).forEach(c=>{if(c!==id)s.add(c);})); return [...s]; }
 function neighborsOf(id){ return [...new Set([...parentsOf(id),...childrenOf(id),...partnersOf(id)])]; }
 function nucleusMembers(nid){ return Object.values(S.persons).filter(p=>p.claimedBy===nid).map(p=>p.id); }
+// who is in a household, so keepers can tell "Adam's household" from the next one: "Adam Rahim, Hana Rahim"
+function membersText(nid,max){ const ids=nucleusMembers(nid); max=max||4;
+  if(!ids.length)return 'nobody claimed yet';
+  return ids.slice(0,max).map(fullName).join(', ')+(ids.length>max?` +${ids.length-max} more`:''); }
+// a household as keepers see it: its name, then who is in it
+const houseText=nid=>{ const n=S.nuclei[nid]; return (n?n.label:'a household')+' ('+membersText(nid,3)+')'; };
 function branchDistance(pid){ // min hops from my nucleus's claimed people
   const seeds=nucleusMembers(S.session.nucleusId);
   if(seeds.includes(pid))return 0;
@@ -578,7 +603,8 @@ function subName(pid){ if(!isPlaceholder(pid))return person(pid).name;
   const l=placeholderLabel(pid); if(displayName(pid)!==l)return l;
   return l===NO_NAME?whereOf(pid):'name not known yet'; }
 function refreshViewingBtn(){ const b=document.getElementById('viewingBtn');
-  if(b&&S.session&&person(viewing()))b.textContent='viewing as '+goesBy(viewing()); }
+  if(b&&S.session&&person(viewing())){ b.innerHTML='<span class="va">viewing as </span>'+esc(goesBy(viewing()));
+    b.title='viewing as '+goesBy(viewing()); } }
 // "only us": a private nickname is shown only to the person who set it and the
 // person it names (the database already keeps it from every other household)
 const isPrivNick=(v,pid)=>!!((S.nickPriv||{})[v]||{})[pid];
@@ -1054,6 +1080,7 @@ if(COARSE){ document.getElementById('navhint').textContent='tap a person to open
   document.getElementById('search').placeholder='search…'; } // the 16px phone text leaves room for less
 document.getElementById('tutBtn').onclick=()=>openTutorial(false);
 document.getElementById('helpBtn').onclick=()=>openHelp();
+document.getElementById('menuBtn').onclick=()=>openMore();
 document.getElementById('adminBtn').onclick=()=>openAdmin();
 document.getElementById('showall').onclick=resetView;
 
@@ -1107,7 +1134,7 @@ const tutKey=()=>'bft.tutSeen.'+(MODE==='cloud'?ME.userId:'demo');
 function openTutorial(forced){ TUT_STEP=0; TUT_FORCED=!!forced; renderTutorial(); }
 function renderTutorial(){
   const steps=[
-    {t:'Welcome to the tree 🐻',b:`This is a map of your family. <b>Drag</b> to move around, <b>scroll or pinch</b> to zoom, and tap <b>◎ me</b> any time to come home to yourself.<br><br>Tap a <b>⊕ chip</b> under a person to unfold their side of the family — one side opens at a time, so it never gets messy. <b>back to my view</b> folds everything again.`},
+    {t:'Welcome to the tree 🐻',b:`This is a map of your family. <b>Drag</b> to move around, <b>scroll or pinch</b> to zoom, and tap <b>◎</b> any time to come home to yourself. Help and the other settings are under <b>?</b> — or <b>⋯</b> on a phone.<br><br>Tap a <b>⊕ chip</b> under a person to unfold their side of the family — one side opens at a time, so it never gets messy. <b>back to my view</b> folds everything again.`},
     {t:'People',b:(COARSE
       ?`<b>Tap</b> a person to open their card — <b>Add relative</b> is in there. When you close it, a <b>＋</b> stays on them for quick adding.`
       :`<b>Click</b> a person once and a <b>＋</b> appears — tap it to add their parent, partner or child. <b>Double-click</b> opens their full card.`)
@@ -1134,19 +1161,38 @@ function renderTutorial(){
 // themselves, so no phone number lives in this (public) code
 const WA_LINK='https://wa.me/?text='+encodeURIComponent('Bear Family Tree 🐻 — I need a hand with: ');
 const WA_RESET='https://wa.me/?text='+encodeURIComponent("Bear Family Tree 🐻 — I've forgotten my password. Could a tree keeper send me a reset code, please?");
+// who to ask: every tree keeper's household, with the people in it
+function keepersHtml(){ const ks=Object.values(S.nuclei||{}).filter(n=>n.isSuper);
+  if(!ks.length)return '';
+  return `<div class="card" id="help_keepers"><div class="label">Tree keepers ⭐</div>
+    ${ks.map(n=>`<div class="nickrow"><span class="nickname" style="font-size:14px;">${esc(membersText(n.id,3))}</span><span class="who">${esc(n.label)}</span></div>`).join('')}
+    <div class="cap2" style="margin-top:6px;">ask one of them for an invite for a relative, or for a reset code if you forget your password</div></div>`; }
 function openHelp(){
   const faqs=[
-    ['I forgot my password',`Ask a tree keeper (⭐) for a reset code — message the family below. Then on the sign-in screen tap <b>Forgot your password?</b> and type your login email, the code and a new password. You keep the same login; a code works once, for 30 minutes. <i>Keepers:</i> open their card and tap <b>🔑 help … back in</b>.`],
-    ["How do I open someone's card?",COARSE?`<b>Tap</b> them on the tree. Or type their name in <b>search the family…</b> at the top.`
-      :`<b>Double-click</b> them on the tree (one click shows the ＋). Or type their name in <b>search the family…</b> at the top.`],
+    ['I forgot my password',`Ask a tree keeper (⭐) for a reset code — message them or the family below. Then on the sign-in screen tap <b>Forgot your password?</b> and type the code and a new password. No email needed: you keep the same login, and the app shows you which email it uses. A code works once, for 30 minutes. <i>Keepers:</i> open their card and tap <b>🔑 help … back in</b>.`],
+    ["How do I open someone's card?",COARSE?`<b>Tap</b> them on the tree. Or type their name in the <b>search</b> box at the top.`
+      :`<b>Double-click</b> them on the tree (one click shows the ＋). Or type their name in the <b>search</b> box at the top.`],
     ['How do I add a child, parent or partner?',`Open the person's card, tap <b>Add relative</b>, type the name, then choose how they're connected — parent, partner, child or sibling — and tap <b>Save</b>.`],
     ['Who can change what?',`Your household looks after the people it has claimed. People nobody has claimed yet can be updated by family within 5 branches. Tree keepers (⭐) can help with everyone. The names <i>you</i> call people are yours alone — 🔒 only us names are seen just by you and that person's household.`],
-    ['How do I invite a relative?',`Tree keepers (⭐) open the relative's card and tap <b>✉ invite … to claim this profile</b>, then share the link — WhatsApp works well. Not a keeper? Ask one, or message the family below.`]];
+    ['How do I invite a relative?',`Tree keepers (⭐) open the relative's card and tap <b>✉ invite … to claim this profile</b>. Show the QR code face to face, or send the link <b>to that person only — never to a group</b>: whoever signs up with it takes the place straight away. Not a keeper? Ask one, or message the family below.`]];
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Help</h3>
-    <div class="card">${faqs.map(([q,a])=>`<div class="faq"><span class="q">${q}</span><p>${a}</p></div>`).join('')}</div>
-    <div class="btnrow" style="margin-top:4px;">
+    ${keepersHtml()}
+    <div class="btnrow" style="margin:0 0 4px;">
       <a class="btn primary" href="${WA_LINK}" target="_blank" rel="noopener" style="text-decoration:none;">💬 Message the family on WhatsApp</a></div>
-    <p class="cap2" style="margin-top:10px;text-align:center;">opens WhatsApp with a message started — pick the family chat and say what's tricky</p>`); }
+    <p class="cap2" style="margin:6px 0 12px;text-align:center;">opens WhatsApp with a message started — pick the family chat and say what's tricky</p>
+    <div class="card">${faqs.map(([q,a])=>`<div class="faq"><span class="q">${q}</span><p>${a}</p></div>`).join('')}</div>`); }
+// phones: the ⋯ in the one-row bar holds what doesn't fit
+function openMore(){ const nuc=S.nuclei[S.session.nucleusId];
+  const row=(id,ic,lb,sub)=>`<button class="choice" id="${id}"><span class="itile">${ic}</span><span>${lb}${sub?`<span class="sub">${sub}</span>`:''}</span></button>`;
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">${esc(nuc.treeName)}</h3>
+    ${row('mo_help','?','Help','who the tree keepers are, and how things work')}
+    ${row('mo_tut','🎓','Tutorial','moving around, people and nicknames')}
+    ${isSuper()||MODE==='demo'?row('mo_admin','⭐','Tree keeper settings','keepers, invites, names to fill in'):''}
+    ${row('mo_rename','✎','Rename your tree',"your household's own name for it")}`);
+  document.getElementById('mo_help').onclick=openHelp;
+  document.getElementById('mo_tut').onclick=()=>openTutorial(false);
+  const a=document.getElementById('mo_admin'); if(a)a.onclick=openAdmin;
+  document.getElementById('mo_rename').onclick=()=>{ closeSheet(); renameTree(); }; }
 
 /* ================= person sheet ================= */
 const SLOT_LABELS={k:'young kid',t:'teen · young adult',a:'adult'};
@@ -1223,7 +1269,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
   const per=person(pid); const editable=canEditPerson(pid); const memEditable=canEditMemorial(pid);
   const dist=branchDistance(pid);
   const claimedLabel=per.claimedBy
-    ?`✓ claimed — ${esc(S.nuclei[per.claimedBy]?.label||'a nucleus')}`
+    ?`✓ claimed — ${esc(S.nuclei[per.claimedBy]?.label||'a household')}`
     :`unverified · cared for by family within 5 branches`;
   // "Also known as": the name they go by, plus names from MY close family —
   // everyone else's names are only counted, so the list stays relatable
@@ -1258,8 +1304,8 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
         <div class="cap2">${esc(facts)}</div>
         ${per.passed?`<div class="cap2">${esc(memorialLine(per))}</div>`:''}
         <div class="cap2" style="color:var(--primary);">${claimedLabel}</div></div></div>
-    ${!per.claimedBy?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="claimPerson('${pid}')">claim — this is me / in my nucleus</button>`:''}
-    ${!per.claimedBy&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="invitePerson('${pid}')">✉ invite ${esc(displayName(pid))} to claim this profile</button>`:''}
+    ${!per.claimedBy?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="claimPerson('${pid}')">claim — this is me, or someone in my household</button>`:''}
+    ${!per.claimedBy&&!per.passed&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="invitePerson('${pid}')">✉ invite ${esc(displayName(pid))} to claim this profile</button>`:''}
     ${per.claimedBy&&per.claimedBy!==S.session.nucleusId&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="helpBackIn('${pid}')">🔑 help ${esc(displayName(pid))} back in</button>`:''}
     <div class="card"><div class="label">You call ${per.passed?'them':'them'}</div>
       <div class="bignick"><input id="mynick" value="${esc(nickFor(pid))}" placeholder="${esc(goesBy(pid))}">
@@ -1272,7 +1318,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     <div class="card"><div class="label">Photos — young kid · teen · adult</div>
       <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div>
       <div class="cap2" style="margin-top:8px;">the starred photo is the face shown on the tree</div></div>
-    ${editable?'':`<div class="viewonly">view only — ${per.claimedBy?'claimed by '+esc(S.nuclei[per.claimedBy]?.label||'another nucleus'):'more than 5 branches away ('+(dist===Infinity?'not connected':dist+' branches')+')'}</div>`}
+    ${editable?'':`<div class="viewonly">view only — ${per.claimedBy?'claimed by '+esc(S.nuclei[per.claimedBy]?.label||'another household'):'more than 5 branches away ('+(dist===Infinity?'not connected':dist+' branches')+')'}</div>`}
     <div class="fld"><span class="flabel">Full name</span>${unknown
       ?`<input id="f_name" value="" placeholder="not known yet — type it here" ${editable?'':'disabled'}>`
       :`<input id="f_name" value="${esc(per.name)}" ${editable?'':'disabled'}>`}</div>
@@ -1397,34 +1443,34 @@ window.deletePersonUI=async(pid)=>{ const per=person(pid); if(!per||pid===viewin
 const claimOk=name=>confirm(`Is ${name} you, or someone in your household?\n\nAfter you claim them, only your household can change their details. A tree keeper (⭐) can undo this later.`);
 window.claimPerson=async(pid)=>{ if(!claimOk(fullName(pid)))return;
   const was=person(pid).claimedBy; person(pid).claimedBy=S.session.nucleusId;
-  save(); openPerson(pid); toast('claimed into your nucleus');
+  save(); openPerson(pid); toast('claimed — your household looks after them now');
   if(!await db.claim(pid)){ person(pid).claimedBy=was; undone(pid); } };
 // tree keepers only: the profile goes back to unverified and can be claimed again (the database keeps a record)
 window.releaseClaimUI=async(pid)=>{ const per=person(pid); if(!per||!per.claimedBy||!isSuper())return;
-  const house=S.nuclei[per.claimedBy]?.label||'their household';
-  if(!confirm(`Release ${fullName(pid)} from ${house}?\n\nThe profile goes back to unverified: family nearby can edit it again, and the right person can claim it. ${house} keeps its login. This is recorded.`))return;
+  const house=houseText(per.claimedBy);
+  if(!confirm(`Release ${fullName(pid)} from ${house}?\n\nThe profile goes back to unverified: family nearby can edit it again, and the right person can claim it. The household keeps its login. This is recorded.`))return;
   const was=per.claimedBy; per.claimedBy=null;
   save(); rebuild(); openPerson(pid); toast('claim released — '+fullName(pid));
   if(!await db.releaseClaim(pid)){ per.claimedBy=was; undone(pid); } };
 // tree keepers only: nothing is emailed, so a forgotten password comes back this way —
 // a one-time code for that household's login, which they type on the sign-in screen
 window.helpBackIn=async(pid)=>{ const per=person(pid); if(!per||!per.claimedBy||!isSuper())return;
-  const house=S.nuclei[per.claimedBy]?.label||'their household', nm=displayName(pid);
-  if(!confirm(`Make a reset code for the login of ${house}?\n\nUse it when ${nm} has forgotten the password. Send it only to ${nm} — whoever has it can choose a new password for that login. It works once, for 30 minutes, and anyone else signed in on that login will need the new password too.`))return;
+  const house=houseText(per.claimedBy), nm=displayName(pid);
+  if(!confirm(`Make a reset code for the login of ${house}?\n\nUse it when ${nm} has forgotten the password. Send it only to ${nm} — whoever has it can choose a new password for that login, and ${nm} will be told a keeper reset it. It works once, for 30 minutes, and anyone else signed in on that login will need the new password too.`))return;
   let res; try{ res=await withTimeout(sb.rpc('issue_reset_code',{p:pid})); }catch(e){ dbErr(e); return; }
   if(res.error){ toast("couldn't make a code — "+String(res.error.message||'please try again').toLowerCase(),6000); return; }
   resetCodeDialog(res.data.code,new Date(res.data.expires_at),nm,house); };
 function resetCodeDialog(code,until,nm,house){
-  const shown=code.slice(0,4)+'-'+code.slice(4), at=until.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
-  const text=`Bear Family Tree 🐻 — your password reset code is ${shown}\n\nOpen ${APP_URL} , tap "Forgot your password?", then type your login email, this code and a new password. The code works once, until ${at}.`;
+  const shown=code.slice(0,4)+'-'+code.slice(4), at=timeOf(until);
+  const text=`Bear Family Tree 🐻 — your password reset code is ${shown}\n\nOpen ${APP_URL} , tap "Forgot your password?", then type this code and a new password — no email needed. The code works once, until ${at}. Please don't forward it.`;
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">🔑 Reset code — ${esc(nm)}</h3>
     <div class="card"><div class="label">For the login of ${esc(house)}</div>
       <div class="bignick" style="justify-content:center;"><span class="v" id="rc_code" style="font-size:30px;letter-spacing:3px;">${esc(shown)}</span></div>
-      <div class="cap2" style="text-align:center;margin-top:6px;">works once · until ${esc(at)} (30 minutes)</div></div>
+      <div class="cap2" style="text-align:center;margin-top:6px;">works once · you have 30 minutes — until ${esc(at)}</div></div>
     <div class="btnrow">
       <a class="btn secondary" id="rc_wa" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener" style="text-decoration:none;">💬 WhatsApp</a>
       <button class="btn primary" id="rc_copy">copy message</button></div>
-    <p class="cap2" style="margin-top:10px;">Send it only to ${esc(nm)} — or read it out on a call. On the sign-in screen they tap <b>Forgot your password?</b> and type their login email, this code and a new password. They keep the same login. Making another code stops this one.</p>`);
+    <p class="cap2" style="margin-top:10px;">Send it to ${esc(nm)} only — never to a group — or read it out on a call. On the sign-in screen they tap <b>Forgot your password?</b> and type this code and a new password; no email needed. They keep the same login, and next time they sign in they're told a keeper reset it. Making another code stops this one.</p>`);
   document.getElementById('rc_copy').onclick=async()=>{
     try{ await navigator.clipboard.writeText(text); toast('message copied — paste it to '+nm); }
     catch(e){ prompt('copy the message:',text); } }; }
@@ -1541,13 +1587,16 @@ function openSelf(){ const per=person(viewing());
     <div class="card"><div class="label">What people call you</div>${rows}</div>
     ${partnersCardHtml(viewing())}
     ${childrenCardHtml(viewing())}
-    <div class="card"><div class="label">Your nucleus</div>
+    <div class="card"><div class="label">Your household</div>
+      <div class="nickrow"><span class="nickname">${esc(nuc.label)}</span><span class="who">the name tree keepers see</span></div>
       <div class="nickrow"><span class="nickname">${esc(members)}</span><span class="who">shared login · always in view</span></div>
       <div class="nickrow"><span class="nickname" style="color:var(--primary);" id="tn_show">${esc(nuc.treeName)}</span>
         <button class="link" onclick="renameTree()">✎ rename</button></div>
-      ${isSuper()||MODE==='demo'?`<div class="nickrow"><span class="nickname">Super settings</span>
+      ${isSuper()||MODE==='demo'?`<div class="nickrow"><span class="nickname">Tree keeper settings</span>
         <button class="link" onclick="openAdmin()">⭐ open</button></div>`:''}</div>
-    ${MODE==='cloud'?`<div class="card"><div class="nickrow"><span class="nickname">Invite a friend to start their own tree</span>
+    ${MODE==='cloud'&&ME.resets&&ME.resets.length?`<div class="card"><div class="label">Your password</div>
+      <div class="cap2">last reset ${esc(dayOf(new Date(ME.resets[0].at)))} at ${esc(timeOf(new Date(ME.resets[0].at)))}, with a code from a tree keeper of ${esc(ME.resets[0].by)}. If you didn't ask for that, tell the family.</div></div>`:''}
+    ${isSuper()?`<div class="card"><div class="nickrow"><span class="nickname">Invite a friend to start their own tree</span>
       <button class="link" onclick="inviteFriend()">✉ share</button></div></div>`:''}
     <div class="card"><div class="label">Photos — young kid · teen · adult</div>
       <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div></div>
@@ -1582,7 +1631,7 @@ window.saveSelf=async()=>{ const per=person(viewing());
   save(); rebuild(); closeSheet(); toast('saved');
   if(!await db.savePerson(per)){ Object.assign(per,was); undone(); } };
 window.renameTree=async()=>{ const nuc=S.nuclei[S.session.nucleusId];
-  const v=prompt('your name for this tree — only your nucleus sees it',nuc.treeName);
+  const v=prompt('your name for this tree — only your household sees it',nuc.treeName);
   const show=()=>{ save(); document.getElementById('treename').textContent=nuc.treeName;
     const el=document.getElementById('tn_show'); if(el)el.textContent=nuc.treeName; };
   if(v&&v.trim()){ const was=nuc.treeName; nuc.treeName=v.trim();
@@ -1671,8 +1720,6 @@ function qrSvg(text){ const m=qrMatrix(text), n=m.length+8; let d='';
 // family chat themselves, so no phone number lives in this (public) code
 const inviteLink=code=>(APP_URL||location.href.split('#')[0])+'#invite='+code;
 const waHref=text=>'https://wa.me/?text='+encodeURIComponent(text);
-const dayOf=d=>d.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'});
-const timeOf=d=>d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
 async function copyText(text,done){ try{ await navigator.clipboard.writeText(text); toast(done); }
   catch(e){ prompt('copy it from here:',text); } }
 // the name an invite greets them by: what YOU call them ("Kak Yana") — unless that's an
@@ -1680,10 +1727,10 @@ async function copyText(text,done){ try{ await navigator.clipboard.writeText(tex
 // words: "Daughter of Aizat & Sarah", never "… & Dear" from a private nickname
 const sharedName=pid=>isPrivNick(viewing(),pid)?goesBy(pid):displayName(pid);
 const inviteName=pid=>isPlaceholder(pid)?placeholderLabel(pid,sharedName):sharedName(pid);
-// a general code (⭐ Super settings): anyone with it can join, then claims or adds themselves
+// a general code (⭐ Tree keeper settings): anyone with it can join, then claims or adds themselves
 function inviteDialog(code,until){
   const link=inviteLink(code), day=dayOf(until);
-  const text=`Bear Family Tree 🐻 — you're invited to join our family tree!\n\nOpen ${link} , create an account, then find yourself on the tree and claim your place (or add yourself).\n\nIf it asks for an invite code: ${code}\nIt works until ${day}.`;
+  const text=`Bear Family Tree 🐻 — you're invited to join our family tree!\n\nOpen ${link} , create an account, then find yourself on the tree and claim your place (or add yourself).\n\nIf it asks for an invite code: ${code}\nIt works until ${day}. Please don't forward it or post it in a group.`;
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">✉ Invite to the family tree</h3>
     <div class="card"><div class="label">General invite code</div>
       <div class="bignick" style="justify-content:center;"><span class="v" id="inv_code" style="font-size:24px;letter-spacing:2px;">${esc(code)}</span></div>
@@ -1691,22 +1738,27 @@ function inviteDialog(code,until){
     <div class="btnrow">
       <a class="btn secondary" id="inv_wa" href="${waHref(text)}" target="_blank" rel="noopener">💬 WhatsApp</a>
       <button class="btn primary" id="inv_copy">copy link</button></div>
-    <p class="cap2" style="margin-top:10px;word-break:break-word;">Send it only to family: anyone with the link or code can join the tree and see everyone on it. The link: ${esc(link)}</p>`);
+    <p class="cap2" style="margin-top:10px;word-break:break-word;">Send it to one person at a time — never to a group chat: anyone with the link or code can join the tree and see everyone on it. The link: ${esc(link)}</p>`);
   document.getElementById('inv_copy').onclick=()=>copyText(link,'link copied'); }
 window.makeInvite=async()=>{ const inv=await db.invite(); if(inv)inviteDialog(inv.code,new Date(inv.expires_at)); };
-window.inviteFriend=()=>{
-  const link=(APP_URL||location.href.split('#')[0])+'#newtree';
-  const text=`Bear Family Tree 🐻 — start your own family tree!\n\nOpen ${link} , create an account and set up your tree. You'll be its first keeper, and it's completely separate from ours.`;
+// tree keepers only: a new tree needs a one-time "start a tree" link (the database makes
+// the code), so strangers can't fill the family's database with trees of their own
+window.inviteFriend=async()=>{ if(!isSuper())return;
+  let res; try{ res=await withTimeout(sb.rpc('make_newtree_code')); }catch(e){ dbErr(e); return; }
+  if(res.error){ toast("couldn't make a link — "+String(res.error.message||'please try again').toLowerCase(),6000); return; }
+  const link=(APP_URL||location.href.split('#')[0])+'#newtree='+res.data.code, day=dayOf(new Date(res.data.expires_at));
+  const text=`Bear Family Tree 🐻 — start your own family tree!\n\nOpen ${link} , create an account and set up your tree. You'll be its first keeper, and it's completely separate from ours.\n\nThe link works once, until ${day} — it's just for you, please don't forward it.`;
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Invite a friend</h3>
     <div class="card"><div class="label">Their own tree</div>
       <div class="cap2">They create an account and start a completely separate tree, as its first keeper (⭐). Your family's tree stays private to your family.</div></div>
     <div class="btnrow">
       <a class="btn secondary" id="fr_wa" href="${waHref(text)}" target="_blank" rel="noopener">💬 WhatsApp</a>
-      <button class="btn primary" id="fr_copy">copy link</button></div>`);
+      <button class="btn primary" id="fr_copy">copy link</button></div>
+    <p class="cap2" style="margin-top:10px;">works once, until ${esc(day)} — send it to that one friend only, never to a group</p>`);
   document.getElementById('fr_copy').onclick=()=>copyText(link,'link copied'); };
 
 // a person's invite — either one claims them, once:
-//   📷 a QR code to scan face to face: 5 minutes to scan it, then 30 to finish signing up
+//   📷 a QR code to scan face to face: 5 minutes to scan it, then 10 to finish signing up
 //      (the database keeps time, make_qr_invite / open_invite); refresh makes a new code
 //      and the old one goes; closing the sheet deletes a code nobody scanned
 //   💬 a link to send: 14 days, the same link each time until it's used or runs out
@@ -1717,9 +1769,9 @@ window.invitePerson=pid=>{ const nm=inviteName(pid);
       <div class="cap2" id="qr_state" style="text-align:center;min-height:34px;" aria-live="polite"></div>
       <div class="btnrow" id="qr_again" style="display:none;margin-top:8px;"><button class="btn primary" id="qr_new">↻ refresh — a new code</button></div></div>
     <div class="card" id="ln_card"><div class="label">💬 Not with you? Send a link</div>
-      <div class="cap2" id="ln_state">a link works for 14 days, once — send it only to ${esc(nm)}</div>
+      <div class="cap2" id="ln_state">a link works for 14 days, once — send it to ${esc(nm)} only, never to a group</div>
       <div class="btnrow" id="ln_row"><button class="btn secondary" id="ln_make">make a 14-day link</button></div></div>
-    <p class="cap2" style="margin-top:4px;">Whoever uses the code or the link first takes ${esc(nm)}'s place, so show the QR code to ${esc(nm)} only, face to face. They point their phone's camera at it, create an account and land straight in their place.</p>`);
+    <p class="cap2" style="margin-top:4px;">Whoever signs up with the code or the link takes ${esc(nm)}'s place straight away. So show the QR code to ${esc(nm)} only, face to face — never on a shared screen — and send the link to ${esc(nm)} only, never to a group. If it reaches the wrong person, they can tap "not me" and it's cancelled.</p>`);
   QR={pid,nm}; keepAwake(QR); newQr();
   document.getElementById('qr_new').onclick=newQr;
   document.getElementById('ln_make').onclick=()=>personLink(pid,nm); };
@@ -1748,28 +1800,37 @@ function qrTick(q){ if(QR!==q)return clearInterval(q.tick);
   qrCheck(q); } // scanned in its last seconds?
 // every few seconds: has it been scanned — or used to take their place?
 async function qrCheck(q){ const code=q.code; if(!code)return;
-  const r=await sb.from('tree_invite').select('opened_at,expires_at').eq('code',code).maybeSingle().then(x=>x,e=>({error:e}));
+  const r=await sb.from('tree_invite').select('opened_at,expires_at,used_at,declined_at').eq('code',code).maybeSingle().then(x=>x,e=>({error:e}));
   if(QR!==q||q.code!==code||r.error)return;
   const done=()=>{ clearInterval(q.tick); q.code=null; };
-  if(!r.data){ done(); // gone: they took their place, or someone deleted it
-    const c=await sb.from('person').select('claimed_by').eq('id',q.pid).maybeSingle().then(x=>x,e=>({error:e}));
-    if(QR!==q)return;
-    if(c.data&&c.data.claimed_by){ qrShow(true,`🎉 ${esc(q.nm)} has taken their place on the tree`);
-      document.getElementById('ln_card').remove(); scheduleRefetch(); }
-    else qrShow(true,'this code was deleted — tap refresh for a new one',true);
-    return; }
+  // used invites stay on record now: the row says what happened. Until keepers confirm a
+  // scan, the one-tap undo is right here: "that wasn't them" releases the claim at once
+  if(r.data&&r.data.used_at){ done(); qrShow(true,`🎉 ${esc(q.nm)} has taken their place on the tree<br>
+      <button class="link" id="qr_undo">↩ that wasn't ${esc(q.nm)}? undo — release this claim</button>`);
+    document.getElementById('ln_card').remove(); scheduleRefetch();
+    document.getElementById('qr_undo').onclick=()=>qrUndo(q); return; }
+  if(r.data&&r.data.declined_at){ done();
+    qrShow(true,`🚫 whoever scanned it said <b>this isn't them</b>, so the code is cancelled — tap refresh to make one for ${esc(q.nm)}`,true); return; }
+  if(!r.data){ done(); qrShow(true,'this code was deleted — tap refresh for a new one',true); return; }
   if(!r.data.opened_at)return;
   const until=new Date(r.data.expires_at);
   if(until<=new Date()){ done(); qrShow(true,`${esc(q.nm)} didn't finish signing up in time — tap refresh for a new code`,true); return; }
   if(q.opened)return;
   q.opened=true; clearInterval(q.tick); q.n=1; q.tick=setInterval(()=>qrTick(q),1000);
-  qrShow(true,`✓ scanned — ${esc(q.nm)} has until <b>${esc(timeOf(until))}</b> to finish signing up<br>
+  qrShow(true,`✓ scanned — ${esc(q.nm)} has ${minsLeft(until)} minutes to finish signing up, until <b>${esc(timeOf(until))}</b><br>
     <button class="link" id="qr_cancel">not ${esc(q.nm)}? cancel this code</button>`);
   document.getElementById('qr_cancel').onclick=async()=>{
     if(!confirm(`Cancel this code? Whoever scanned it can't use it to take ${q.nm}'s place any more.`))return;
     const d=await dropQr(code,true); if(QR!==q)return;
     if(d.error){ dbErr(d.error); return; }
     done(); qrShow(true,'code cancelled — tap refresh for a new one',true); }; }
+async function qrUndo(q){ const b=document.getElementById('qr_undo'); if(!b)return;
+  b.disabled=true; b.textContent='releasing…';
+  const {error}=await sb.rpc('release_claim',{p:q.pid}).then(x=>x,e=>({error:e}));
+  if(QR!==q)return;
+  if(error){ dbErr(error); b.disabled=false; b.textContent=`↩ that wasn't ${q.nm}? undo — release this claim`; return; }
+  if(person(q.pid))person(q.pid).claimedBy=null; save(); rebuild();
+  qrShow(true,`claim released — ${esc(q.nm)}'s place is free again (this is recorded). Whoever signed up still has a login that can see the tree: ask Claude to remove it. Tap refresh to make a new code for ${esc(q.nm)}.`,true); }
 const dropQr=(code,evenScanned)=>{ let d=sb.from('tree_invite').delete().eq('code',code);
   if(!evenScanned)d=d.is('opened_at',null); // scanned: they're signing up — leave it for them
   return d.then(x=>x,e=>({error:e})); };
@@ -1784,6 +1845,7 @@ async function keepAwake(q){ try{ const l=await navigator.wakeLock.request('scre
 async function personLink(pid,nm){ const row=document.getElementById('ln_row');
   row.innerHTML='<button class="btn secondary" disabled>making a link…</button>';
   let {data,error}=await sb.from('tree_invite').select('code,expires_at').eq('person_id',pid).eq('kind','link')
+    .is('used_at',null).is('declined_at',null)
     .gt('expires_at',new Date().toISOString()).order('expires_at',{ascending:false}).limit(1).then(x=>x,e=>({error:e}));
   if(!error&&!data.length)({data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId,person_id:pid,invite_name:nm})
     .select('code,expires_at').then(x=>x,e=>({error:e})));
@@ -1791,15 +1853,15 @@ async function personLink(pid,nm){ const row=document.getElementById('ln_row');
   if(error){ dbErr(error); row.innerHTML='<button class="btn secondary" id="ln_make">make a 14-day link</button>';
     document.getElementById('ln_make').onclick=()=>personLink(pid,nm); return; }
   const link=inviteLink(data[0].code), day=dayOf(new Date(data[0].expires_at));
-  const text=`${nm}, you're invited to join our family tree on Bear Family Tree 🐻\n\nOpen this link, create an account, and you'll land straight in your place on the tree:\n${link}\n\nIt works once, until ${day}. It's just for you — whoever opens it first takes your place.`;
-  document.getElementById('ln_state').textContent=`works once, until ${day} — send it only to ${nm}`;
+  const text=`${nm}, you're invited to join our family tree on Bear Family Tree 🐻\n\nOpen this link, create an account, and you'll land straight in your place on the tree:\n${link}\n\nIt works once, until ${day}. It's just for you — please don't forward it or post it in a group: whoever signs up with it takes your place. Not you? Open it and tap "not me" to cancel it.`;
+  document.getElementById('ln_state').textContent=`works once, until ${day} — send it to ${nm} only, never to a group`;
   row.innerHTML=`<a class="btn secondary" id="ln_wa" href="${waHref(text)}" target="_blank" rel="noopener">💬 WhatsApp</a>
     <button class="btn primary" id="ln_copy">copy link</button>`;
   document.getElementById('ln_copy').onclick=()=>copyText(link,'link copied — send it only to '+nm); }
 window.makeSuper=async(nid,flag)=>{
   const {error}=await sb.rpc('set_super',{target:nid,flag});
   if(error){ toast((error.message||'failed').toLowerCase()); return; }
-  S.nuclei[nid].isSuper=flag; openAdmin(); toast(flag?'made super user ⭐':'super user removed'); };
+  S.nuclei[nid].isSuper=flag; openAdmin(); toast(flag?'made a tree keeper ⭐':'no longer a tree keeper'); };
 // keepers' list: everyone still called "?", the ones with the most children first
 function namesToFillHtml(){
   const ids=Object.keys(S.persons).filter(isPlaceholder)
@@ -1818,49 +1880,67 @@ window.focusName=()=>{ const f=document.getElementById('f_name'); if(!f||f.disab
   f.focus({preventScroll:true}); f.scrollIntoView({block:'center'}); };
 window.openAdmin=async()=>{ if(!isSuper()){
     // the demo has no keepers or invites to manage — just the names list, to try it
-    if(MODE==='demo'){ openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Super settings</h3>
+    if(MODE==='demo'){ openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Tree keeper settings</h3>
       ${namesToFillHtml()}
-      <p class="cap2" style="text-align:center;">demo — on the real tree, only tree keepers (⭐) see this, along with super users and invites</p>`);
+      <p class="cap2" style="text-align:center;">demo — on the real tree, only tree keepers (⭐) see this, along with the households, the keepers and invites</p>`);
       wireNamesToFill(); }
     return; }
-  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Super settings</h3>
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Tree keeper settings</h3>
     ${namesToFillHtml()}
-    <div class="card"><div class="label">Super users · up to 3</div>
-      ${Object.values(S.nuclei).map(n=>`<div class="nickrow"><span class="nickname">${esc(n.label)}</span>
+    <div class="card"><div class="label">Households · tree keepers up to 3</div>
+      ${Object.values(S.nuclei).sort((a,b)=>(b.isSuper-a.isSuper)||a.label.localeCompare(b.label)).map(n=>`<div class="nickrow"><span class="nickname" style="font-size:14px;">${esc(n.label)}
+          <span class="cap2" style="display:block;font-weight:400;">${esc(membersText(n.id))}</span></span>
         <span class="who">${n.isSuper
-          ?`⭐ super${n.id!==ME.nucleusId?` · <button class="link" onclick="makeSuper('${n.id}',false)">remove</button>`:''}`
-          :`<button class="link" onclick="makeSuper('${n.id}',true)">make super</button>`}</span></div>`).join('')}
-      <div class="cap2" style="margin-top:6px;">super users can edit everyone on the tree, create invites, and send personal claim-links from any unclaimed profile — use it kindly 🐻</div></div>
+          ?`⭐ keeper${n.id!==ME.nucleusId?` · <button class="link" onclick="makeSuper('${n.id}',false)">remove</button>`:''}`
+          :`<button class="link" onclick="makeSuper('${n.id}',true)">make keeper</button>`}</span></div>`).join('')}
+      <div class="cap2" style="margin-top:6px;">tree keepers can edit everyone on the tree, invite relatives and make reset codes — use it kindly 🐻</div></div>
     <div class="card"><div class="label">Invites</div>
       <div class="nickrow"><span class="nickname">General invite code</span>
         <button class="link" onclick="makeInvite()">✉ create</button></div>
-      <div id="adm_pending" class="cap2" style="margin-top:4px;">loading pending invites…</div>
-      <div class="cap2" style="margin-top:6px;">personal claim-invites live on each unclaimed person's profile (✉ invite … to claim)</div></div>`);
+      <div id="adm_pending" class="cap2" style="margin-top:4px;">loading invites…</div>
+      <div class="cap2" style="margin-top:6px;">personal invites live on each unclaimed person's card (✉ invite … to claim). Send each one to that person only — never to a group.</div></div>
+    <div class="card"><div class="label">Invites so far — numbers only</div><div id="adm_counts" class="cap2">loading…</div></div>`);
   wireNamesToFill();
   try{
     const {data:all,error}=await sb.from('tree_invite').select('*').order('expires_at',{ascending:false});
     const box=document.getElementById('adm_pending'); if(!box)return;
     if(error)throw error;
-    // a QR code lives for minutes: listed while it works, never once it has run out
-    const data=all.filter(i=>!(i.kind==='qr'&&new Date(i.expires_at)<new Date()));
-    if(!data.length){ box.textContent='no pending invites'; return; }
-    box.innerHTML=data.map(i=>{ const dead=new Date(i.expires_at)<new Date(), qr=i.kind==='qr';
+    // used personal invites and declined ones are the record, not "pending"; a QR code lives
+    // for minutes: listed while it works, never once it has run out
+    const now=new Date(), data=all.filter(i=>!i.declined_at&&!(i.person_id&&i.used_at)&&!(i.kind==='qr'&&new Date(i.expires_at)<now));
+    if(!data.length){ box.textContent='no invites waiting'; }
+    else{ box.innerHTML=data.map(i=>{ const dead=new Date(i.expires_at)<now, qr=i.kind==='qr', used=i.uses>0;
       const label=i.invite_name?esc(i.invite_name):(i.person_id?'personal invite':'general code');
       return `<div class="nickrow"><span class="nickname" style="font-size:13px;">${label}
-          <span class="cap2">${qr?`QR code${i.opened_at?' · scanned':''}`:esc(i.code)}${dead?' · expired':''}</span></span>
+          <span class="cap2">${qr?`QR code${i.opened_at?' · scanned':''}`:esc(i.code)}${used?` · used ${i.uses}×`:''}${dead?' · run out':''}</span></span>
         <span class="who">${dead||qr?'':`<button class="link" data-copy="${esc(i.code)}">copy</button> · `}
-          <button class="link" data-revoke="${esc(i.code)}">delete</button></span></div>`; }).join('');
-    // codes go in data-attributes, never inside onclick="…" strings
-    box.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>copyInviteLink(b.dataset.copy));
-    box.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>revokeInvite(b.dataset.revoke));
+          ${used?(dead?'':`<button class="link" data-stop="${esc(i.code)}">stop</button>`):`<button class="link" data-revoke="${esc(i.code)}">delete</button>`}</span></div>`; }).join('');
+      // codes go in data-attributes, never inside onclick="…" strings
+      box.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>copyInviteLink(b.dataset.copy));
+      box.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>revokeInvite(b.dataset.revoke));
+      box.querySelectorAll('[data-stop]').forEach(b=>b.onclick=()=>stopInvite(b.dataset.stop)); }
   }catch(e){ const box=document.getElementById('adm_pending');
-    if(box)box.textContent="couldn't load invites — "+((e&&e.message)||e); } };
+    if(box)box.textContent="couldn't load invites — "+((e&&e.message)||e); }
+  try{ const {data,error}=await sb.from('invite_funnel').select('*'); const box=document.getElementById('adm_counts'); if(!box)return;
+    if(error)throw error;
+    const by=Object.fromEntries(data.map(x=>[x.channel,x])), n=(x,k)=>(x&&x[k])||0;
+    const rows=[['qr','QR codes','scanned'],['link','14-day links','opened'],['code','general codes','opened']].filter(([c])=>by[c])
+      .map(([c,lb,op])=>{ const x=by[c]; return `<div class="nickrow"><span class="nickname" style="font-size:13px;">${lb}</span>
+        <span class="who">${n(x,'made')} made · ${n(x,'opened')} ${op} · ${n(x,'joins')} joined${n(x,'declined')?` · ${n(x,'declined')} said "not me"`:''}</span></div>`; });
+    box.innerHTML=rows.join('')||'none yet'; }
+  catch(e){ const box=document.getElementById('adm_counts'); if(box)box.textContent="couldn't load the numbers"; } };
 window.copyInviteLink=code=>copyText(inviteLink(code),'link copied');
 window.revokeInvite=async(code)=>{
   if(!confirm('Delete this invite? The link and code stop working immediately.'))return;
-  const {error}=await sb.from('tree_invite').delete().eq('code',code);
+  const {data,error}=await sb.from('tree_invite').delete().eq('code',code).select('code');
   if(error){ dbErr(error); return; }
-  toast('invite deleted'); openAdmin(); };
+  toast(data&&data.length?'invite deleted':"that invite has been used, so it stays on record — tap stop instead"); openAdmin(); };
+// a general code that has been used stays on record: it can be stopped, not deleted
+window.stopInvite=async(code)=>{
+  if(!confirm('Stop this invite code? Nobody else can join with it. Who already joined stays.'))return;
+  const {error}=await sb.rpc('stop_invite',{invite_code:code});
+  if(error){ dbErr(error); return; }
+  toast('invite stopped'); openAdmin(); };
 window.signOut=async()=>{ if(MODE==='cloud'){ try{ localStorage.removeItem('bft.prefs.'+ME.userId);
     await sb.auth.signOut(); }catch(e){} }
   else { S.session=null; save(); }
@@ -1927,42 +2007,57 @@ function renderOffline(retry){ MODE='demo';
 // nothing is emailed: a tree keeper makes a one-time code on the person's card
 // (🔑 help … back in) and they choose a new password here — same login as before
 const RESET_MSGS={
-  no:"that email and code don't match — check both for typos. A code works once, for 30 minutes; if yours is older, ask the keeper for a new one.",
-  locked:'too many tries with that email — please wait 30 minutes, then ask the keeper for a new code',
+  no:"that code doesn't work — check it for typos. A code works once, for 30 minutes; if yours is older, ask the keeper for a new one.",
+  locked:'too many wrong codes have been tried in the last half hour — please wait 30 minutes, then try again (ask the keeper for a new code if yours has run out by then)',
   short:'please choose a longer password — at least 6 characters',
   long:'that password is too long — 72 characters at most'};
+// the code alone finds the login (a keeper makes it for one household), so nobody has to
+// remember which email they signed up with — the app shows it to them afterwards
+const RESET_SEEN='bft.resetSeen';      // resets this browser did itself (no "your password was reset" notice here)
+const seenResets=()=>{ try{ return JSON.parse(localStorage.getItem(RESET_SEEN)||'[]'); }catch(e){ return []; } };
+function markResetSeen(ids){ try{ localStorage.setItem(RESET_SEEN,JSON.stringify([...new Set([...seenResets(),...ids.map(String)])].slice(-50))); }catch(e){} }
 function renderForgot(prefill){
   loginCard(`<h1>Forgot your password?</h1>
-    <div class="cap">ask a family keeper (⭐) for a reset code — they make one from your card on the tree. Then fill this in:</div>
+    <div class="cap">ask a tree keeper (⭐) for a reset code — they make one from your card on the tree. Then type it here with a new password. No email needed.</div>
     <form id="fp_form" name="reset" method="post" action="#">
-      <div class="fld" style="text-align:left;"><span class="flabel">Your login email</span><input id="fp_email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(prefill||'')}"></div>
       <div class="fld" style="text-align:left;"><span class="flabel">Reset code from the keeper</span><input id="fp_code" name="one-time-code" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="16" placeholder="8 letters and numbers"></div>
       <div class="fld" style="text-align:left;"><span class="flabel">New password · at least 6 characters</span><input id="fp_pass" name="new-password" type="password" autocomplete="new-password"></div>
-      <div id="fp_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
+      <div id="fp_msg" class="cap" style="min-height:18px;margin-bottom:8px;" role="status" aria-live="polite"></div>
       <button type="submit" class="btn primary" style="width:100%;">Save new password</button>
     </form>
     <div class="btnrow"><a class="btn secondary" href="${WA_RESET}" target="_blank" rel="noopener" style="text-decoration:none;">💬 Ask the family on WhatsApp</a></div>
     <button class="link" id="fp_back" style="margin-top:12px;">back to sign in</button>`);
   const msg=t=>{document.getElementById('fp_msg').textContent=t;};
   const val=id=>document.getElementById(id).value;
-  document.getElementById('fp_back').onclick=()=>renderLogin(false,val('fp_email').trim());
+  document.getElementById('fp_back').onclick=()=>renderLogin(false,prefill||'');
   document.getElementById('fp_form').onsubmit=async e=>{ e.preventDefault();
-    const email=val('fp_email').trim(), code=val('fp_code').trim(), password=val('fp_pass');
-    if(!email||!code||!password){msg('your login email, the code and a new password, please');return;}
+    const code=val('fp_code').trim(), password=val('fp_pass');
+    if(!code||!password){msg('the code and a new password, please');return;}
     if(password.length<6){msg(RESET_MSGS.short);return;}
     if(!sb){renderOffline();return;}
     msg('checking the code…');
     let data,error; try{ ({data,error}=await withTimeout(sb.rpc('redeem_reset_code',
-      {login_email:email,reset_code:code,new_password:password}))); }catch(e){ error=e; }
-    if(error&&isNetErr(error)){renderOffline(()=>renderForgot(email));return;}
+      {reset_code:code,new_password:password}))); }catch(e){ error=e; }
+    if(error&&isNetErr(error)){renderOffline(()=>renderForgot(prefill));return;}
     if(error){msg(authMsg(error,'could not check the code'));return;}
-    if(data!=='ok'){msg(RESET_MSGS[data]||RESET_MSGS.no);return;}
+    const result=data&&data.result;
+    if(result!=='ok'||!data.email){msg(RESET_MSGS[result]||RESET_MSGS.no);return;}
+    markResetSeen([data.reset_id]); // done here: no "your password was reset" notice on this phone
     msg('new password saved — signing you in…');
+    const email=data.email;
     try{ ({error}=await withTimeout(sb.auth.signInWithPassword({email,password}))); }catch(e){ error=e; }
     if(error){ renderLogin(false,email,'new password saved — please sign in with it'); return; }
-    toast('password changed — welcome back 🐻',4000); enterCloud(); }; }
+    // the dead end was a forgotten email: say which one this login uses, before going in
+    loginCard(`<h1>Password changed 🐻</h1>
+      <div class="cap">You're signed in. Next time, sign in with this email and your new password:</div>
+      <div class="card" style="background:var(--field);box-shadow:none;border-radius:16px;padding:14px 12px;margin:4px 0 14px;">
+        <div class="label">Your login email</div>
+        <div id="fp_email_shown" style="font-size:16px;font-weight:600;word-break:break-all;">${esc(email)}</div></div>
+      <div class="cap">Write it down, or let your phone remember it.</div>
+      <button class="btn primary" style="width:100%;" id="fp_go">Go to the tree</button>`);
+    document.getElementById('fp_go').onclick=()=>enterCloud(); }; }
 // an invite link or QR code was opened: ask the database once — it greets them by name,
-// and a QR code's 30 minutes to finish signing up start now. Resolves to what open_invite
+// and a QR code's 10 minutes to finish signing up start now. Resolves to what open_invite
 // answered (null: unknown, used or run out), or undefined when it couldn't be asked.
 let INVITE_INFO=null;
 function openInvite(){ if(!PENDING_INVITE||!sb)return Promise.resolve(undefined);
@@ -1973,7 +2068,7 @@ function inviteNote(inv,welcome){
   if(!inv)return "this invite has run out or has already been used — ask the family for a fresh one (a new QR code, or a new link) 🐻";
   return [welcome?(inv.name?esc(inv.name)+", you're":"you're")+' invited to join Bear Family Tree! 🐻'
       :inv.family&&inv.name?`taking the place of <b>${esc(inv.name)}</b>`:'',
-    inv.kind==='qr'?`<span style="font-weight:400;">please finish by ${esc(timeOf(new Date(inv.expires_at)))} — you have 30 minutes</span>`:'']
+    inv.kind==='qr'?`<span style="font-weight:400;">you have ${minsLeft(new Date(inv.expires_at))} minutes to finish — until ${esc(timeOf(new Date(inv.expires_at)))}</span>`:'']
     .filter(Boolean).join('<br>'); }
 // "Is this you?" — a personal invite shows the close family they're joining, drawn like
 // the tree: parents above, brothers & sisters and partner beside them, children below.
@@ -2037,10 +2132,10 @@ function renderLogin(signup,prefillEmail,note){
       <div class="fld" style="text-align:left;"><span class="flabel">Password</span>${signup
         ?'<input id="au_newpass" name="new-password" type="password" autocomplete="new-password">'
         :'<input id="au_pass" name="password" type="password" autocomplete="current-password">'}</div>
-      <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;">${esc(note||'')}</div>
+      <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;" role="status" aria-live="polite">${esc(note||'')}</div>
       <button type="submit" class="btn primary" style="width:100%;" id="${signup?'au_up':'au_in'}">${signup?'Create account':'Sign in'}</button>
     </form>
-    ${signup?'':'<button class="link" id="au_forgot" style="margin-top:12px;display:block;margin-left:auto;margin-right:auto;line-height:19px;">Forgot your password?<br><span style="font-weight:400;">Ask a family keeper for a reset code</span></button>'}
+    ${signup?'':'<button class="link" id="au_forgot" style="margin-top:12px;display:block;margin-left:auto;margin-right:auto;line-height:19px;">Forgot your password?<br><span style="font-weight:400;">Ask a tree keeper for a reset code</span></button>'}
     <button class="link" id="au_sw" style="margin-top:12px;">${signup?'already have an account? sign in':'new here? create an account'}</button></div>
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
@@ -2080,10 +2175,20 @@ function renderLogin(signup,prefillEmail,note){
       <button class="link" id="inv_no" style="margin-top:12px;">not me</button>`;
       document.getElementById('inv_yes').onclick=()=>{ INVITE_SURE=true; who.innerHTML=sure();
         show(); document.getElementById('au_email').focus(); };
+      // "not me": asked once more, then the invite is cancelled for good and the keeper sees it
       document.getElementById('inv_no').onclick=()=>{ who.innerHTML=familyHtml(inv)
-        +`<div class="cap" style="color:var(--ink);">Then please stop here — nothing has been saved. Tell whoever gave you this code, so they can make one for the right person.</div>
-        <button class="link" id="inv_back">it is me after all</button>`;
-        document.getElementById('inv_back').onclick=ask; }; };
+        +`<div class="cap" style="color:var(--ink);">Not you? Then this invite was meant for someone else. Cancel it, so nobody else can use it — the tree keeper who made it will see that you said "not me". Nothing about you is saved.</div>
+        <button class="btn primary" style="width:100%;" id="inv_cancel">Cancel this invite</button>
+        <button class="link" id="inv_back" style="margin-top:12px;">back — it is me</button>`;
+        document.getElementById('inv_back').onclick=ask;
+        document.getElementById('inv_cancel').onclick=async()=>{ const c=PENDING_INVITE;
+          who.innerHTML='<div class="cap">cancelling…</div>';
+          let r; try{ r=await withTimeout(sb.rpc('decline_invite',{invite_code:c})); }catch(e){ r={error:e}; }
+          if(r.error){ who.innerHTML=`<div class="cap" style="color:var(--ink);">We couldn't cancel it just now — ${esc(isNetErr(r.error)?"we can't reach the family tree":'please try again')}.</div>
+            <button class="link" id="inv_back">back</button>`; document.getElementById('inv_back').onclick=ask; return; }
+          try{ localStorage.removeItem('bft.pendingInvite'); }catch(e){} PENDING_INVITE=null; INVITE_INFO=null;
+          b.innerHTML='this invite is cancelled 🐻';
+          who.innerHTML=`<div class="cap" style="color:var(--ink);">Thank you — this invite is cancelled and nothing has been saved. Tell whoever sent it to you, so they can send one to the right person.</div>`; }; }; };
     ask(); });
   document.getElementById('au_sw').onclick=()=>renderLogin(!signup,creds().email);
   const fg=document.getElementById('au_forgot'); if(fg)fg.onclick=()=>renderForgot(creds().email);
@@ -2133,7 +2238,7 @@ function renderOnboarding(){
   loginCard(`<h1>Welcome 🐻</h1>
     <div class="cap">set up your place in the family</div>
     <button class="choice" id="ob_new"><span class="itile">🌱</span>
-      <span>Start a new family tree<span class="sub">you're the first one here</span></span></button>
+      <span>Start a new family tree<span class="sub">with a start-a-tree link from a tree keeper</span></span></button>
     <button class="choice" id="ob_join"><span class="itile">✉</span>
       <span>Join with an invite code<span class="sub">someone in the family sent you a code</span></span></button>
     <button class="link" id="ob_out" style="margin-top:12px;">sign out</button>`);
@@ -2141,41 +2246,44 @@ function renderOnboarding(){
   document.getElementById('ob_new').onclick=renderStartTree;
   document.getElementById('ob_join').onclick=()=>{
     loginCard(`<h1>Join the family</h1>
-      <div class="fld" style="text-align:left;"><span class="flabel">Invite code</span><input id="ob_code"></div>
-      <div class="fld" style="text-align:left;"><span class="flabel">Your household name</span><input id="ob_label" placeholder="e.g. Kak Ina"></div>
-      <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ob_tree" placeholder="e.g. my family"></div>
-      <div id="ob_msg" class="cap" style="min-height:18px;"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Invite code</span><input id="ob_code" autocapitalize="off" autocorrect="off" spellcheck="false"></div>
+      <div class="cap">your household is named after you, so the tree keepers can tell everyone apart</div>
+      <div id="ob_msg" class="cap" style="min-height:18px;" role="status" aria-live="polite"></div>
       <button class="btn primary" style="width:100%;" id="ob_go">Join</button>`);
     document.getElementById('ob_go').onclick=async()=>{
       const code=document.getElementById('ob_code').value.trim();
-      const label=document.getElementById('ob_label').value.trim()||'our household';
-      const tn=document.getElementById('ob_tree').value.trim()||'our family';
       if(!code){document.getElementById('ob_msg').textContent='the invite code is needed';return;}
       document.getElementById('ob_msg').textContent='joining…';
-      const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
+      // no names to type: the database names the household after its first member
+      // and gives it the tree keepers' name for the tree
+      const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:'',tree_nm:''});
       if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
       await cloudFetchAll();
       if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);
       else renderWhoAreYou(); }; }; }
-function renderStartTree(){
+// a new tree needs a keeper's one-time code: from the #newtree= link, or pasted here
+const startCodeOf=s=>{ const m=String(s||'').match(/(?:newtree=)?([0-9a-f]{12})\b/i); return m?m[1].toLowerCase():''; };
+function renderStartTree(){ const pending=startCodeOf(PENDING_NEWTREE);
   loginCard(`<h1>Start your tree</h1>
-    <div class="cap">you'll be its first super user — the keeper of the invites</div>
+    <div class="cap">you'll be its first tree keeper ⭐ — you look after its invites</div>
     <div class="fld" style="text-align:left;"><span class="flabel">Your full name</span><input id="ob_name"></div>
     <div class="fld" style="text-align:left;"><span class="flabel">Gender</span>
       <select id="ob_gender"><option value="">—</option><option value="m">man</option><option value="f">woman</option></select></div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Household name</span><input id="ob_label" placeholder="e.g. Aizat & Sarah's household"></div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ob_tree" placeholder="e.g. BearFamily"></div>
-    <div id="ob_msg" class="cap" style="min-height:18px;"></div>
+    <div class="fld" style="text-align:left;"><span class="flabel">Name of your tree — you can change it later</span><input id="ob_tree" value="Our family"></div>
+    ${pending?'':`<div class="fld" style="text-align:left;"><span class="flabel">Start-a-tree link or code, from a tree keeper</span><input id="ob_start" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="paste the link they sent you"></div>`}
+    <div id="ob_msg" class="cap" style="min-height:18px;" role="status" aria-live="polite"></div>
     <button class="btn primary" style="width:100%;" id="ob_go">Create</button>
     <button class="link" id="ob_out2" style="margin-top:12px;">sign out</button>`);
   document.getElementById('ob_out2').onclick=signOut;
   document.getElementById('ob_go').onclick=async()=>{
     const name=document.getElementById('ob_name').value.trim();
-    const label=document.getElementById('ob_label').value.trim()||'our household';
-    const tn=document.getElementById('ob_tree').value.trim()||'our family';
+    const tn=document.getElementById('ob_tree').value.trim();
+    const start=pending||startCodeOf((document.getElementById('ob_start')||{}).value);
     if(!name){document.getElementById('ob_msg').textContent='your name is needed';return;}
+    if(!start){document.getElementById('ob_msg').textContent='a new tree needs the start-a-tree link a tree keeper sent you — paste it in the last box';return;}
     document.getElementById('ob_msg').textContent='creating…';
-    const {error}=await sb.rpc('create_tree',{nucleus_label:label,tree_nm:tn});
+    // the household is named after you once you're on the tree ("Aizat's household")
+    const {error}=await sb.rpc('create_tree',{nucleus_label:'',tree_nm:tn,start_code:start});
     if(error){document.getElementById('ob_msg').textContent=(error.message||'failed').toLowerCase();return;}
     await cloudFetchAll();
     const id=crypto.randomUUID();
@@ -2186,20 +2294,17 @@ function renderStartTree(){
     await cloudFetchAll(); startSession(ME.nucleusId,id); }; }
 function renderJoinInvited(code){
   loginCard(`<h1>Welcome 🐻</h1>
-    <div class="cap">you've been invited — name your household and you'll land in your place</div>
+    <div class="cap">you've been invited — one tap and you're in your place on the tree</div>
     <div id="ji_note" class="cap" style="color:var(--primary);font-weight:500;"></div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Your household name</span><input id="ji_label" placeholder="e.g. Kak Ina · or Adam & Hana's household"></div>
-    <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ji_tree" placeholder="e.g. my family"></div>
-    <div id="ji_msg" class="cap" style="min-height:18px;"></div>
+    <div class="cap">your household is named after you, so the tree keepers can tell everyone apart</div>
+    <div id="ji_msg" class="cap" style="min-height:18px;" role="status" aria-live="polite"></div>
     <button class="btn primary" style="width:100%;" id="ji_go">Take my place</button>
     <button class="link" id="ji_out" style="margin-top:12px;">sign out</button>`);
   openInvite().then(inv=>{ const n=document.getElementById('ji_note'); if(n&&inv!==undefined)n.innerHTML=inviteNote(inv,false); });
   document.getElementById('ji_out').onclick=signOut;
   document.getElementById('ji_go').onclick=async()=>{
-    const label=document.getElementById('ji_label').value.trim()||'our household';
-    const tn=document.getElementById('ji_tree').value.trim()||'our family';
     document.getElementById('ji_msg').textContent='joining…';
-    const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
+    const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:'',tree_nm:''});
     if(error){ document.getElementById('ji_msg').textContent=/invalid or expired/.test(error.message||'')?inviteNote(null)
       :(error.message||'failed').toLowerCase(); return; }
     try{localStorage.removeItem('bft.pendingInvite');}catch(e){} PENDING_INVITE=null;
@@ -2257,7 +2362,38 @@ function enterApp(){
   rebuild(); view.s=1; centerOn(viewing()); updateFocusBar();
   if(MODE==='cloud'){ subscribeRealtime(); stampSeen(); }
   document.getElementById('adminBtn').style.display=isSuper()?'flex':'none';
-  try{ if(!localStorage.getItem(tutKey()))setTimeout(()=>openTutorial(true),600); }catch(e){} }
+  const tutorial=()=>{ try{ if(!localStorage.getItem(tutKey()))setTimeout(()=>openTutorial(true),600); }catch(e){} };
+  // something to tell them first (a password reset, a declined invite)? the tutorial waits for next time
+  if(MODE==='cloud')cloudNotices().then(shown=>{ if(!shown)tutorial(); }); else tutorial(); }
+// told once on this device: "your password was reset by a tree keeper" (a reset done on another
+// phone — maybe not by them), and, for keepers, invites someone said "not me" to
+const declineKey=()=>'bft.declineSeen.'+ME.userId;
+async function cloudNotices(){ const notes=[], seenD=[];
+  try{ const {data,error}=await withTimeout(sb.rpc('my_password_resets')); if(error)throw error;
+    ME.resets=Array.isArray(data)?data:[];
+    const seen=seenResets();
+    ME.resets.filter(x=>!seen.includes(String(x.id))).forEach(x=>{ const at=new Date(x.at);
+      notes.push({reset:String(x.id),html:`<div class="card"><div class="label">🔑 Your password was reset</div>
+        <p style="font-size:14px;line-height:21px;">A tree keeper from <b>${esc(x.by)}</b> made a reset code for this login, and it was used on ${esc(dayOf(at))} at ${esc(timeOf(at))}.</p>
+        <div class="cap2" style="margin-top:6px;">If that was you asking for help, all is well. If not, tell the family straight away — another keeper can help you back in.</div></div>`}); }); }
+  catch(e){ ME.resets=ME.resets||[]; }
+  if(isSuper()) try{ const since=new Date(Date.now()-14*864e5).toISOString();
+    const {data,error}=await withTimeout(sb.from('tree_invite').select('code,invite_name,kind,declined_at,person_id').not('declined_at','is',null).gt('declined_at',since));
+    if(error)throw error;
+    let seen=[]; try{ seen=JSON.parse(localStorage.getItem(declineKey())||'[]'); }catch(e){}
+    // (once that person has joined anyway, there's nothing left to do)
+    (data||[]).filter(i=>!seen.includes(i.code)&&!(i.person_id&&S.persons[i.person_id]&&S.persons[i.person_id].claimedBy)).forEach(i=>{ const at=new Date(i.declined_at), nm=i.invite_name||'a relative';
+      seenD.push(i.code);
+      notes.push({html:`<div class="card"><div class="label">🚫 Invite cancelled — "not me"</div>
+        <p style="font-size:14px;line-height:21px;">Someone opened the ${i.kind==='qr'?'QR code':'link'} for <b>${esc(nm)}</b> and said it isn't them, so it was cancelled on ${esc(dayOf(at))} at ${esc(timeOf(at))}.</p>
+        <div class="cap2" style="margin-top:6px;">If ${esc(nm)} still needs one, open their card and make a new invite — and send it to them only, never to a group.</div></div>`}); }); }
+  catch(e){}
+  if(!notes.length||sheet.classList.contains('open'))return false;
+  openSheet(`${notes.map(n=>n.html).join('')}<div class="btnrow"><button class="btn primary" id="nt_ok">OK</button></div>`);
+  document.getElementById('nt_ok').onclick=()=>{ markResetSeen(notes.filter(n=>n.reset).map(n=>n.reset));
+    try{ localStorage.setItem(declineKey(),JSON.stringify([...JSON.parse(localStorage.getItem(declineKey())||'[]'),...seenD].slice(-100))); }catch(e){}
+    closeSheet(); };
+  return true; }
 const IDLE_DAYS=30;                     // signed out after this many quiet days (Aizat's call — change the number)
 const IDLE_MS=IDLE_DAYS*24*60*60*1000;
 function stampSeen(){ if(MODE==='cloud'&&ME.userId)
