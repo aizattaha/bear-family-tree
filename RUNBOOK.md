@@ -119,7 +119,9 @@ has no login yet (their card says "unverified").
 2. Tap **✉ invite … to claim this profile**. A big QR code appears, with "works for 4:59".
 3. Hold your phone out. They open their phone's **Camera**, point it at the code and tap the
    link that pops up.
-4. On their phone: **Create account** (their email + a password, at least 6 characters) →
+4. On their phone they first see **"Is this you?"** — the name of their place (e.g. "Daughter of
+   Aizat & Paige") and the first names of their close family. They tap **Yes, that's me** (or
+   **not me**, which stops there). Then **Create account** (their email + a password, at least 6 characters) →
    name their household → **Take my place**. They're in, as themselves.
 5. Your screen shows "✓ scanned — … has until …", then "🎉 … has taken their place on the tree".
 
