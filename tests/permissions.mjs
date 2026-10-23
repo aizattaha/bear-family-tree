@@ -481,6 +481,9 @@ const pQ = randomUUID();
 r = await B.from('person').insert({ id: pQ, tree_id: treeA, full_name: '?', gender: 'f' }).select('id');
 await B.from('relationship').insert({ tree_id: treeA, kind: 'partner', person_a: pB, person_b: pQ });
 check('a person added as "?" is marked name_unknown by the database', !r.error && unk(pQ) === 't', r.error?.message || unk(pQ));
+const pQe = randomUUID();
+r = await B.from('person').insert({ id: pQe, tree_id: treeA, full_name: '' }).select('id');
+check('a person added with an empty name is accepted and marked too (the app allows it)', !r.error && unk(pQe) === 't', r.error?.message || unk(pQe));
 for (const [nm, want] of [['??', 't'], ['  Unknown ', 't'], ['UNKNOWN', 't'], ['', 't'], ['Siti Aminah', 'f'], ['?', 't'], ['Ali?', 'f'], ['Unknown Ali', 'f'],
   ['-', 't'], [' -- ', 't'], ['\u2014', 't'], ['\u2013', 't'], ['?-', 't'], ['Ali-Hassan', 'f'], ['-Ali', 'f']]) { // Aizat types "-" for the same thing
   r = await B.from('person').update({ full_name: nm }).eq('id', pQ).select('id');

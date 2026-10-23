@@ -247,18 +247,28 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
       const last = who[who.length - 1] || {};
       check(`${L}: "Who are you?" lists her as "Zulkifli's wife · name not known yet", last — never as "?"`,
         last.id === 'maklong' && /Zulkifli's wife/.test(last.t) && /name not known yet/.test(last.t) && !who.some(r => /^\? \?/.test(r.t)), last.t);
-      // adding someone as "?" the usual way: Kak Ina's husband
+      // adding someone whose name isn't known: leave the name empty — Kak Ina's husband
       await page.waitForTimeout(300);
       if (await page.isVisible('#showall')) await page.click('#showall'); // back to my view: Kak Ina beside me
       await page.waitForTimeout(700);
       await page.locator('.node[data-pid="ina"] .avatar').dblclick(); await sheetOpen(page);
       await page.click('#sheetbody button:has-text("Add relative")');
-      await page.fill('#a_name', '?'); await page.selectOption('#a_gender', 'm');
+      await page.selectOption('#a_gender', 'm');
       await page.click('.choice[data-rel="partner"]'); await page.click('#a_save');
       const added = await page.evaluate(() => { const id = partnersOf('ina')[0];
-        return { label: fullName(id), toast: document.getElementById('toast').textContent, cls: document.querySelector(`.node[data-pid="${id}"]`)?.className }; });
-      check(`${L}: adding "?" as Kak Ina's partner shows "Kak Ina's husband"`, added.label === "Kak Ina's husband"
+        return { name: id && S.persons[id].name, label: id && fullName(id), toast: document.getElementById('toast').textContent, cls: document.querySelector(`.node[data-pid="${id}"]`)?.className }; });
+      check(`${L}: adding with the name left empty saves "Kak Ina's husband", name not known yet`, added.name === '' && added.label === "Kak Ina's husband"
         && /added — Kak Ina's husband/.test(added.toast) && / unknown/.test(added.cls || ''), JSON.stringify(added));
+      // clearing a real name on a card asks first, then makes them "name not known yet"
+      const asked = []; page.on('dialog', d => asked.push(d.message()));
+      await page.waitForFunction(() => !document.getElementById('sheet').classList.contains('open'));
+      await page.evaluate(() => openPerson('dina')); await sheetOpen(page);
+      await page.fill('#f_name', '');
+      await page.click('#sheetbody button.btn.primary:has-text("Save")');
+      const cleared = await page.evaluate(() => ({ name: S.persons.dina.name, ph: isPlaceholder('dina'), label: fullName('dina'), sub: subName('dina') }));
+      check(`${L}: clearing Dina's name asks first, then she's "Name not known yet · child of …"`,
+        asked.some(m => /Clear Dina Zulkifli's name\?/.test(m) && /Name not known yet/.test(m)) && cleared.name === '' && cleared.ph
+        && cleared.label === 'Name not known yet' && /^child of Pak Long/.test(cleared.sub), JSON.stringify({ asked, cleared }));
     }
     check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
     check(`${L}: the demo never contacted Supabase`, supabase.length === 0, supabase.join(' | '));
