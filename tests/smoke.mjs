@@ -76,6 +76,11 @@ await guard('desktop', async () => {
   const forgotFaq = await page.textContent('#sheetbody .faq:first-of-type p');
   check('help: "I forgot my password" points to a keeper\'s reset code, not an email', /reset code/.test(forgotFaq) && !/by email|check spam/i.test(forgotFaq), forgotFaq);
   check('help: WhatsApp link pre-fills a message and has no phone number', /^https:\/\/wa\.me\/\?text=/.test(href || '') && !/\d{6,}/.test(decodeURIComponent(href || '')), href);
+  const keepers = (await page.textContent('#help_keepers').catch(() => '')).replace(/\s+/g, ' ');
+  check('help: says who the tree keepers are — names and household', /Tree keepers/i.test(keepers) && /Aizat Taha/.test(keepers) && /Aizat & Sarah's household/.test(keepers), keepers);
+  check('help: "I forgot my password" needs no email', /no email needed/i.test(forgotFaq), forgotFaq);
+  check('help: inviting — to that person only, never to a group; whoever signs up takes the place', /never to a group/.test(await page.textContent('#sheetbody')) && /takes the place straight away/.test(await page.textContent('#sheetbody')));
+  check('desktop: the app bar keeps ? 🎓 − + and no ⋯', await page.isVisible('#helpBtn') && await page.isVisible('#tutBtn') && await page.isVisible('#zoomIn') && !(await page.isVisible('#menuBtn')));
   await closeSheet(page);
   // a new card starts at the top, even after the last one was scrolled
   await sarah.dblclick(); await page.evaluate(() => { document.getElementById('sheet').scrollTop = 400; });
@@ -108,6 +113,20 @@ await guard('desktop', async () => {
 await guard('phone', async () => {
   const { ctx, page, errors, supabase } = await demo('phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 });
   check('phone: touch wording in the hint', /tap a person/.test(await page.textContent('#navhint')));
+  const bar = await page.evaluate(() => { const b = document.getElementById('appbar').getBoundingClientRect();
+    const shown = [...document.getElementById('appbar').children].filter(e => e.offsetParent !== null).map(e => { const r = e.getBoundingClientRect(); return { id: e.id || e.className, top: Math.round(r.top), right: Math.round(r.right) }; });
+    return { h: Math.round(b.height), shown, oneRow: shown.every(x => Math.abs(x.top - shown[0].top) <= 6), fits: shown.every(x => x.right <= 375) }; });
+  check('phone: the app bar is ONE row that fits the screen (🐻, search, who, ◎, ⋯)', bar.h <= 64 && bar.oneRow && bar.fits
+    && bar.shown.map(x => x.id).join(',') === 'bear,searchwrap,viewingBtn,homeBtn,menuBtn', JSON.stringify(bar));
+  await page.tap('#menuBtn');
+  const menu = await sheetOpen(page) && await page.textContent('#sheetbody');
+  check('phone: ⋯ holds Help, Tutorial, settings and Rename', /Help/.test(menu) && /Tutorial/.test(menu) && /Tree keeper settings/.test(menu) && /Rename your tree/.test(menu), menu);
+  await page.tap('#mo_help');
+  check('phone: …and Help opens from there, keepers listed above the questions', await page.locator('#sheetbody #help_keepers').count() === 1
+    && await page.evaluate(() => { const k = document.getElementById('help_keepers'), f = document.querySelector('#sheetbody .faq'); return !!k && !!f && k.getBoundingClientRect().top < f.getBoundingClientRect().top; }));
+  const wa = await page.locator('#sheetbody a[href^="https://wa.me/"]').boundingBox();
+  check('phone: the WhatsApp button in Help is on the first screen', wa && wa.y + wa.height <= 812, wa && `${Math.round(wa.y)}px`);
+  await closeSheet(page);
   await page.locator('.node[data-pid="alya"] .avatar').tap();
   check('phone: one tap opens the card', await sheetOpen(page) && await page.locator('#sheetbody h3', { hasText: 'Alya Aizat' }).count() === 1);
   // an iPhone zooms the page in on any visible text box under 16px — none allowed
@@ -135,21 +154,37 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     page.on('pageerror', e => errors.push(e.message));
     await page.route(/supabase\.co/, r => { supabase.push(r.request().url()); r.abort(); });
     await page.goto(BASE);
-    check(`forgot (${label}): sign-in offers "ask a family keeper for a reset code"`, /Ask a family keeper for a reset code/.test(await page.textContent('#au_forgot')));
+    check(`forgot (${label}): sign-in offers "ask a tree keeper for a reset code"`, /Ask a tree keeper for a reset code/.test(await page.textContent('#au_forgot')));
     await page.click('#au_forgot');
-    check(`forgot (${label}): email + code + new password, and nothing about emails`,
-      await page.locator('#fp_email').count() === 1 && await page.locator('#fp_code').count() === 1 && await page.locator('#fp_pass').count() === 1
-      && !/reset link|we'll send|check spam|emailed/i.test(await page.textContent('#login')));
+    check(`forgot (${label}): just the code + a new password — no email to remember`,
+      await page.locator('#fp_email').count() === 0 && await page.locator('#fp_code').count() === 1 && await page.locator('#fp_pass').count() === 1
+      && /No email needed/.test(await page.textContent('#login')) && !/reset link|we'll send|check spam|emailed|login email/i.test(await page.textContent('#login')));
     const wa = await page.getAttribute('#login a[href^="https://wa.me/"]', 'href');
     check(`forgot (${label}): "ask the family" WhatsApp link has no phone number`, /^https:\/\/wa\.me\/\?text=.*reset%20code/.test(wa || '') && !/\d{6,}/.test(decodeURIComponent(wa || '')), wa);
     if (label === 'phone') {
       const small = await page.evaluate(() => [...document.querySelectorAll('#login input')].filter(el => parseFloat(getComputedStyle(el).fontSize) < 16).map(el => el.id));
       check('forgot (phone): its text boxes are ≥ 16px, so iPhone never zooms in', small.length === 0, small.join(', '));
     }
-    await page.fill('#fp_email', 'someone@example.com'); await page.fill('#fp_code', 'ABCD-EFGH'); await page.fill('#fp_pass', 'abc');
+    await page.fill('#fp_code', 'ABCD-EFGH'); await page.fill('#fp_pass', 'abc');
     await page.click('#fp_form button[type=submit]');
     check(`forgot (${label}): a password under 6 characters is caught before anything is sent`,
       /at least 6 characters/.test(await page.textContent('#fp_msg')) && supabase.length === 0, supabase.join(' | '));
+    // made-up database answers from here: a wrong code, then a right one
+    await page.unroute(/supabase\.co/); const sent = [];
+    let answer = { result: 'no' };
+    await page.route(/supabase\.co/, r => { const u = r.request().url(); sent.push(u.replace(/^.*\/v1\//, '') + ' ' + (r.request().postData() || ''));
+      if (/rpc\/redeem_reset_code/.test(u)) return r.fulfill({ json: answer }); r.abort(); });
+    await page.fill('#fp_pass', 'a-good-new-password'); await page.click('#fp_form button[type=submit]');
+    await page.waitForFunction(() => /doesn't work/.test(document.getElementById('fp_msg').textContent), null, { timeout: 3000 }).catch(() => {});
+    check(`forgot (${label}): only the code and the password go to the database`, sent.length === 1
+      && /"reset_code":"ABCD-EFGH"/.test(sent[0]) && /"new_password"/.test(sent[0]) && !/email/.test(sent[0]), sent.join(' | '));
+    check(`forgot (${label}): a wrong code says so in plain words`, /that code doesn't work — check it for typos/.test(await page.textContent('#fp_msg')));
+    answer = { result: 'ok', email: 'someone@example.com', reset_id: 7 };
+    await page.click('#fp_form button[type=submit]');
+    await page.waitForSelector('#au_email', { timeout: 4000 }).catch(() => {});
+    check(`forgot (${label}): the right code → signs in with the login's own email (shown, so it isn't forgotten again)`,
+      await page.inputValue('#au_email').catch(() => '') === 'someone@example.com' && sent.some(x => /token\?grant_type=password/.test(x) && /someone@example\.com/.test(x)), sent.join(' | '));
+    check(`forgot (${label}): this browser won't be told "your password was reset" about its own reset`, await page.evaluate(() => seenResets().includes('7')));
     check(`forgot (${label}): no errors in the page`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   });
@@ -298,6 +333,7 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await page.route(/supabase\.co/, r => { const q = r.request(), u = decodeURIComponent(q.url()); calls.push(`${q.method()} ${u.replace(/^.*\/v1\//, '')}`);
       if (q.postData()) bodies.push(q.postData());
       if (/rpc\/make_qr_invite/.test(u)) return r.fulfill({ json: { code: codes[made++ % 3], expires_at: new Date(Date.now() + 3e5).toISOString(), seconds: 300 } });
+      if (/rpc\/make_newtree_code/.test(u)) return r.fulfill({ json: { code: 'abcabcabcabc', expires_at: new Date(Date.now() + 14 * 864e5).toISOString() } });
       if (/tree_invite/.test(u) && q.method() === 'GET' && /select=opened_at/.test(u)) return r.fulfill({ json: invite() });
       if (/tree_invite/.test(u) && q.method() === 'GET') return r.fulfill({ json: [] });
       if (/tree_invite/.test(u) && q.method() === 'POST') return r.fulfill({ status: 201, json: [{ code: 'linklinklink', expires_at: new Date(Date.now() + 14 * 864e5).toISOString() }] });
@@ -318,7 +354,10 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     check(`${L}: a QR code is drawn, and reads as the invite link for that code`, await readQr(page) === LIVE + '#invite=abcdefabcdef');
     const t0 = await page.textContent('#qr_state'); await page.waitForTimeout(2100); const t1 = await page.textContent('#qr_state');
     check(`${L}: it says how long it works — "works for 5:00 / 4:59" — and counts down`, /works for (5:00|4:5\d)/.test(t0) && /works for 4:5\d/.test(t1) && t0 !== t1, `${t0} → ${t1}`);
-    check(`${L}: …asking the database who opened it, every few seconds`, calls.some(c => /^GET tree_invite\?select=opened_at,expires_at&code=eq\.abcdefabcdef/.test(c)), calls.join(' | '));
+    check(`${L}: …asking the database who opened, used or declined it, every few seconds`, calls.some(c => /^GET tree_invite\?select=opened_at,expires_at,used_at,declined_at&code=eq\.abcdefabcdef/.test(c)), calls.join(' | '));
+    check(`${L}: the sheet says: to that person only, face to face, never a shared screen or a group; "not me" cancels`,
+      /never on a shared screen/.test(await page.textContent('#sheetbody')) && /never to a group/.test(await page.textContent('#ln_state'))
+      && /takes .+'s place straight away/.test(await page.textContent('#sheetbody')) && /"not me"/.test(await page.textContent('#sheetbody')));
     check(`${L}: the refresh button waits until the code has run out`, !(await page.isVisible('#qr_new')));
     if (phone) { const b = await page.locator('#qr_box').boundingBox();
       check('invites (phone): the QR code is big and fits the screen', b && b.width >= 240 && b.x >= 0 && b.x + b.width <= 375, b && `${Math.round(b.width)}px at ${Math.round(b.x)}`); }
@@ -330,19 +369,28 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await page.waitForFunction(() => document.querySelector('#qr_box svg') && !document.querySelector('#qr_box.dead'), null, { timeout: 3000 });
     check(`${L}: refresh makes a brand-new code (the database deletes the old one)`, made === 2 && await readQr(page) === LIVE + '#invite=fedcbafedcba' && !(await page.isVisible('#qr_new')));
     // they scan it: the keeper's screen says so; then they take their place
-    invite = () => [{ opened_at: new Date().toISOString(), expires_at: new Date(Date.now() + 18e5).toISOString() }];
+    invite = () => [{ opened_at: new Date().toISOString(), expires_at: new Date(Date.now() + 6e5).toISOString() }];
     await page.waitForFunction(() => /scanned/.test(document.getElementById('qr_state').textContent), null, { timeout: 6000 }).catch(() => {});
-    check(`${L}: scanned → "✓ scanned — … has until … to finish", greyed so nobody else scans it`, /✓ scanned — .+ has until .+ to finish signing up/.test(await page.textContent('#qr_state'))
+    check(`${L}: scanned → "✓ scanned — … has 10 minutes to finish, until 2:59 pm", greyed so nobody else scans it`,
+      /✓ scanned — .+ has 10 minutes to finish signing up, until \d{1,2}:\d\d (am|pm)/.test(await page.textContent('#qr_state'))
       && await page.locator('#qr_box.dead').count() === 1 && await page.isVisible('#qr_cancel'), (await page.textContent('#qr_state')).replace(/\s+/g, ' '));
-    invite = () => []; claimed = 'n-someone';
+    invite = () => [{ opened_at: new Date().toISOString(), expires_at: new Date(Date.now() + 6e5).toISOString(), used_at: new Date().toISOString() }];
     await page.evaluate(() => qrCheck(QR));
     check(`${L}: used → "🎉 … has taken their place on the tree", and no more link to send`, /🎉 .+ has taken their place on the tree/.test(await page.textContent('#qr_state'))
       && await page.locator('#ln_card').count() === 0);
+    // "not me" on their phone: the keeper's screen says so, and offers a fresh code
+    invite = () => [{ opened_at: null, expires_at: new Date(Date.now() + 3e5).toISOString() }];
+    await page.evaluate(p => invitePerson(p), pid); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
+    invite = () => [{ opened_at: new Date().toISOString(), expires_at: new Date().toISOString(), declined_at: new Date().toISOString() }];
+    await page.evaluate(() => qrCheck(QR));
+    check(`${L}: declined → "🚫 … said this isn't them, so the code is cancelled", refresh shows`, /🚫 .+this isn't them.+cancelled/.test(await page.textContent('#qr_state'))
+      && await page.isVisible('#qr_new'), await page.textContent('#qr_state'));
+    await closeSheet(page);
     // closing the sheet deletes a code nobody scanned
     invite = () => [{ opened_at: null, expires_at: new Date(Date.now() + 3e5).toISOString() }];
     await page.evaluate(p => invitePerson(p), pid); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
     await closeSheet(page); await page.waitForTimeout(300);
-    check(`${L}: closing the sheet deletes the unscanned code (never a scanned one)`, calls.some(c => /^DELETE tree_invite\?code=eq\.bbbbccccdddd&opened_at=is\.null/.test(c)), calls.filter(c => /DELETE/.test(c)).join(' | '));
+    check(`${L}: closing the sheet deletes the unscanned code (never a scanned one)`, calls.some(c => /^DELETE tree_invite\?code=eq\.(abcdefabcdef|fedcbafedcba|bbbbccccdddd)&opened_at=is\.null/.test(c)), calls.filter(c => /DELETE/.test(c)).join(' | '));
     // 💬 a 14-day link instead
     await page.evaluate(p => invitePerson(p), pid); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
     check(`${L}: the sheet says which is which: QR = with you now; link = 14 days`, /With you now\? Let them scan this/i.test(await page.textContent('#sheetbody'))
@@ -351,7 +399,9 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     const lwa = await page.getAttribute('#ln_wa', 'href');
     check(`${L}: link → 💬 WhatsApp with the link in the message, no phone number`, noNumber(lwa) && decodeURIComponent(lwa).includes(LIVE + '#invite=linklinklink')
       && await page.getAttribute('#ln_wa', 'target') === '_blank' && /noopener/.test(await page.getAttribute('#ln_wa', 'rel')), lwa);
-    check(`${L}: …plus "copy link", and "works once, until …"`, await page.locator('#ln_copy:has-text("copy link")').count() === 1 && /works once, until/.test(await page.textContent('#ln_state')));
+    check(`${L}: …plus "copy link", and "works once, until … — to … only, never to a group"`, await page.locator('#ln_copy:has-text("copy link")').count() === 1
+      && /works once, until .+ only, never to a group/.test(await page.textContent('#ln_state')) && /don't forward it or post it in a group/.test(decodeURIComponent(lwa)));
+    check(`${L}: an existing link is reused only if it's still unused and not declined`, calls.some(c => /^GET tree_invite\?select=code,expires_at&person_id=eq\..+&kind=eq\.link&used_at=is\.null&declined_at=is\.null/.test(c)), calls.filter(c => /select=code/.test(c)).join(' | '));
     check(`${L}: no "send by email" / mailto in the invite sheet`, !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')));
     await closeSheet(page);
     // ⭐ general code and "invite a friend"
@@ -359,11 +409,16 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     const gwa = await page.getAttribute('#inv_wa', 'href');
     check(`${L}: general code → 💬 WhatsApp (link + code, no phone number) + copy link`, noNumber(gwa) && decodeURIComponent(gwa).includes(LIVE + '#invite=abcdefabcdef')
       && decodeURIComponent(gwa).includes('invite code: abcdefabcdef') && await page.locator('#inv_copy:has-text("copy link")').count() === 1
-      && !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')), gwa);
+      && !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')) && /never to a group chat/.test(await page.textContent('#sheetbody')), gwa);
     await closeSheet(page);
-    await page.evaluate(() => inviteFriend()); await sheetOpen(page);
+    await page.evaluate(() => inviteFriend()); await page.waitForTimeout(400);
+    check(`${L}: only tree keepers can invite a friend to start a tree`, !calls.some(c => /make_newtree_code/.test(c)) && !(await page.isVisible('#fr_wa')));
+    await page.evaluate(async () => { const n = S.session.nucleusId, was = S.nuclei[n].isSuper;
+      S.nuclei[n].isSuper = true; ME.nucleusId = n; MODE = 'cloud'; const p = inviteFriend(); MODE = 'demo'; await p; ME.nucleusId = null; S.nuclei[n].isSuper = was; });
+    await sheetOpen(page);
     const fwa = await page.getAttribute('#fr_wa', 'href');
-    check(`${L}: invite a friend → 💬 WhatsApp (#newtree link, no phone number) + copy link`, noNumber(fwa) && decodeURIComponent(fwa).includes(LIVE + '#newtree')
+    check(`${L}: invite a friend → a one-time start-a-tree link (#newtree=code) on 💬 WhatsApp, no phone number`, noNumber(fwa) && decodeURIComponent(fwa).includes(LIVE + '#newtree=abcabcabcabc')
+      && calls.some(c => /rpc\/make_newtree_code/.test(c)) && /works once, until/.test(await page.textContent('#sheetbody'))
       && await page.locator('#fr_copy:has-text("copy link")').count() === 1 && !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')), fwa);
     if (phone) { const h = await page.locator('#fr_wa').boundingBox();
       check('invites (phone): the WhatsApp button is a full-size button', h && h.height >= 44, h && `${Math.round(h.height)}px`); }
@@ -388,6 +443,33 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
   });
 }
 check('no "mailto:" left anywhere in the app', !/mailto:/i.test(APP_SRC));
+const oldWords = APP_SRC.match(/Super settings|super users?\b|make super|⭐ super|in my nucleus|Your nucleus|into your nucleus|a nucleus'|another nucleus|only your nucleus/gi) || [];
+check('words: "tree keeper" and "household" everywhere — no "super user" or "nucleus" on screen', oldWords.length === 0, oldWords.join(', '));
+
+// ---------- clock times, joining and starting a tree (no database needed for these screens) ----------
+await guard('screens', async () => {
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }), page = await ctx.newPage(), errors = [], sent = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.route(/supabase\.co/, r => { sent.push(r.request().url()); r.abort(); });
+  await page.goto(BASE);
+  const times = await page.evaluate(() => [new Date(2026, 9, 24, 14, 59), new Date(2026, 9, 24, 0, 5), new Date(2026, 9, 24, 12, 0), new Date(2026, 9, 24, 9, 7)].map(timeOf));
+  check('times always say am or pm: 2:59 pm, 12:05 am, 12:00 pm, 9:07 am', times.join(',') === '2:59 pm,12:05 am,12:00 pm,9:07 am', times.join(','));
+  await page.evaluate(() => renderJoinInvited('abcdefabcdef'));
+  check('joining with an invite: no household or tree-name boxes, one button', await page.locator('#ji_label, #ji_tree').count() === 0
+    && await page.isVisible('#ji_go') && /named after you/.test(await page.textContent('#login')));
+  await page.evaluate(() => { renderOnboarding(); document.getElementById('ob_join').click(); });
+  check('joining with a code: just the code box', await page.locator('#ob_code').count() === 1 && await page.locator('#ob_label, #ob_tree').count() === 0);
+  await page.evaluate(() => { PENDING_NEWTREE = null; renderStartTree(); });
+  check('starting a tree: no household box; the tree name is filled in; a start-a-tree code is asked for', await page.locator('#ob_label').count() === 0
+    && await page.inputValue('#ob_tree') === 'Our family' && await page.isVisible('#ob_start'));
+  await page.fill('#ob_name', 'Test Person'); await page.tap('#ob_go');
+  check('…without a code it says what\'s needed and sends nothing', /start-a-tree link/.test(await page.textContent('#ob_msg')) && sent.length === 0, sent.join(' | '));
+  check('…a pasted link or a bare code both work', await page.evaluate(() => [startCodeOf('https://x/#newtree=ABCDEFabcdef'), startCodeOf(' abcdefabcdef '), startCodeOf('nope')].join('|')) === 'abcdefabcdef|abcdefabcdef|');
+  await page.evaluate(() => { PENDING_NEWTREE = 'abcdefabcdef'; renderStartTree(); });
+  check('…with the code from the link, no code box', await page.locator('#ob_start').count() === 0);
+  check('screens: no errors in the page', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+});
 
 // ---------- "Is this you?": a personal invite shows the family before the sign-up form ----------
 await guard('is this you', async () => {
@@ -410,8 +492,8 @@ await guard('is this you', async () => {
   check('is this you: the little tree fits the 375px phone screen', tree && tree.fits);
   check('is this you: no email or password boxes until they say "Yes, that\'s me"', !(await page.isVisible('#au_email')) && !(await page.isVisible('#au_up')));
   await page.tap('#inv_no');
-  check('is this you: "not me" → stop here, nothing saved, still no form', /Then please stop here — nothing has been saved/.test(await page.textContent('#inv_who'))
-    && !(await page.isVisible('#au_email')));
+  check('is this you: "not me" → asks once more ("Cancel this invite" / "back — it is me"), still no form', /Not you\? Then this invite was meant for someone else/.test(await page.textContent('#inv_who'))
+    && await page.isVisible('#inv_cancel') && await page.isVisible('#inv_back') && !(await page.isVisible('#au_email')));
   await page.tap('#inv_back'); await page.tap('#inv_yes');
   check('is this you: "Yes, that\'s me" → "✓ joining as …" and the form, cursor in the email box', /✓ joining as Daughter of Aizat & Sarah/.test(await page.textContent('#inv_who'))
     && await page.isVisible('#au_up') && await page.evaluate(() => document.activeElement.id) === 'au_email');
@@ -421,12 +503,26 @@ await guard('is this you', async () => {
   check('is this you: text boxes stay ≥ 16px on the phone', small.length === 0, small.join(', '));
   check('is this you: no errors in the page', errors.length === 0, errors.join(' | '));
   await ctx.close();
+  // "not me" → Cancel this invite: the database is told, and the invite is forgotten here too
+  const ctx2 = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }), p2 = await ctx2.newPage(), declined = [];
+  p2.on('pageerror', e => errors.push(e.message));
+  await p2.route(/supabase\.co/, r => { const u = r.request().url();
+    if (/rpc\/open_invite/.test(u)) return r.fulfill({ json: answer });
+    if (/rpc\/decline_invite/.test(u)) { declined.push(r.request().postData()); return r.fulfill({ json: true }); }
+    r.abort(); });
+  await p2.goto(BASE + '#invite=abcdefabcdef'); await p2.waitForSelector('#inv_no', { timeout: 3000 });
+  await p2.tap('#inv_no'); await p2.tap('#inv_cancel');
+  await p2.waitForFunction(() => /cancelled/.test(document.getElementById('inv_who').textContent), null, { timeout: 3000 }).catch(() => {});
+  check('is this you: "Cancel this invite" tells the database (decline_invite) and says it\'s cancelled, nothing saved',
+    declined.length === 1 && /"invite_code":"abcdefabcdef"/.test(declined[0]) && /this invite is cancelled and nothing has been saved/.test(await p2.textContent('#inv_who'))
+    && !(await p2.isVisible('#au_email')) && await p2.evaluate(() => !localStorage.getItem('bft.pendingInvite')), declined.join(' | '));
+  await ctx2.close();
 });
 
 // ---------- the relative's side: a QR code / link opens the app ----------
 await guard('invite landing', async () => {
   for (const [what, answer, want] of [
-    ['a QR code', { name: 'Kak Yana', kind: 'qr', expires_at: new Date(Date.now() + 18e5).toISOString(), seconds: 1800 }, /Kak Yana, you're invited.*please finish by .+ you have 30 minutes/s],
+    ['a QR code', { name: 'Kak Yana', kind: 'qr', expires_at: new Date(Date.now() + 6e5).toISOString(), seconds: 600 }, /Kak Yana, you're invited.*you have 10 minutes to finish — until \d{1,2}:\d\d (am|pm)/s],
     ['a 14-day link', { name: 'Kak Yana', kind: 'link', expires_at: new Date(Date.now() + 9 * 864e5).toISOString(), seconds: 9 * 86400 }, /^Kak Yana, you're invited to join Bear Family Tree! 🐻$/],
     ['a code that ran out', null, /has run out or has already been used — ask the family for a fresh one/]]) {
     const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }), page = await ctx.newPage(), errors = [], opened = [];

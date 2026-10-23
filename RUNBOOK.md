@@ -6,19 +6,26 @@ folder and paste the sentence in quotes.
 ## What runs by itself on the Mac
 | Job | When | Where it writes |
 |---|---|---|
-| **Daily keep-awake check** (`com.bearfamilytree.keepawake`) | every day at 9:00, on wake if the Mac was asleep, and at login | one line per run in `~/Library/Logs/BearFamilyTree-keepawake.log`; a pop-up if the database doesn't answer |
-| **Weekly backup** (`com.bearfamilytree.backup`) | Sundays 10:00 (or on next wake) | Google Drive → Aizat → Backups → bear-family-tree → `YYYY-MM-DD_weekly` (the newest 8 are kept) |
+| **Daily keep-awake check** (`com.bearfamilytree.keepawake`) | every day at 9:00, on wake if the Mac was asleep, and at login | one line per run in `~/Library/Logs/BearFamilyTree-keepawake.log`; a pop-up if the database doesn't answer, **or if the newest weekly backup is more than 8 days old** |
+| **Weekly backup** (`com.bearfamilytree.backup`) | Sundays 10:00 (or on next wake) | Google Drive → Aizat → Backups → bear-family-tree → `YYYY-MM-DD_weekly` (the newest 8 are kept); its log notes the database's size, with a pop-up **if it passes 300 MB** (the free plan stops at 500 MB) |
 
 Both only work while the Mac is switched on. A Mac switched off for more than 7 days lets the
 free database go to sleep (see 1).
+
+**Going away for more than 5 days?** Leave the Mac plugged in, switched on and logged in (lid
+open, or closed with a screen attached), so the daily check keeps the database awake and Sunday's
+backup runs — or **tell Claude before you go**: "I'm away from <date> to <date>, keep Bear Family
+Tree awake." When you're back, the pop-up "Bear Family Tree backup is old" means Sunday's backup
+didn't run: open Docker Desktop, then **ask Claude**: "Run the Bear Family Tree weekly backup now".
 
 **See the last few keep-awake checks:** press ⌘ + Space, type `Terminal`, press Enter, paste this
 and press Enter:
 ```bash
 tail -5 ~/Library/Logs/BearFamilyTree-keepawake.log
 ```
-Good lines look like `2026-10-24 09:00  OK    HTTP 200 in 0.2s`. `SKIP` means the Mac had no
-internet at that moment (it tries again next time). `DOWN` means see 1.
+Good lines look like `2026-10-24 09:00  OK    HTTP 200 in 0.2s · backup 1 day old`. `SKIP` means
+the Mac had no internet at that moment (it tries again next time). `DOWN` means see 1.
+`OLD BACKUP` means the newest weekly backup is more than 8 days old — see "Going away" above.
 
 ---
 
@@ -32,8 +39,8 @@ Restore", or relatives see "Can't reach the tree".
    - **The page opens but says "Can't reach the tree"** → go on to step 2.
 2. Open https://supabase.com/dashboard and sign in (your Supabase login from your password manager).
 3. Click the project **bear-family-tree**. If it says **Paused**, click **Restore project**.
-   It takes 2–5 minutes; wait until it shows as healthy. (Free projects can be restored for 90 days
-   after they pause.)
+   It takes 2–5 minutes; wait until it shows as healthy. (A paused free project can still be
+   restored later, but do it the same day, so relatives aren't locked out.)
 4. Reload the family tree page and sign in — everything should be as it was.
 5. Check the daily job sees it too — in Terminal (⌘ + Space, `Terminal`, Enter), paste:
    ```bash
@@ -58,9 +65,16 @@ For one wrong change ("someone changed Grandma's birth year"), don't restore: **
   (the only error is the empty photo-storage list, which is harmless).
 
 ## 3. Undo a bad release
-**The website (app) part — you can do it yourself:**
+> ⚠️ **If the change lists a file under `supabase/migrations` (look at the "Files changed" tab),
+> don't press Revert — ask Claude:** "Undo the Bear Family Tree change <name>; it has a database
+> part." Reverting would take the database file out of the code while the live database keeps the
+> change, and the next database update would then fail. Claude writes a new change that undoes
+> both, tests it, and asks you before it goes live.
+
+**A change with no `supabase/migrations` file — you can undo it yourself:**
 1. Open https://github.com/aizattaha/bear-family-tree/pulls?q=is%3Apr+is%3Amerged and sign in.
-2. Click the change that broke things (the newest is at the top).
+2. Click the change that broke things (the newest is at the top). Open **Files changed** and check
+   no file starts with `supabase/migrations` (if one does, stop — see the warning above).
 3. Click **Revert** (bottom of the page), then **Create pull request**.
 4. Wait 3–5 minutes for the green tick next to **database + app checks**.
 5. Click **Merge pull request**, then **Confirm merge**. The old version is live about a minute later.
@@ -83,36 +97,48 @@ There's no button for this in the app yet. It's done in Supabase:
    - Their household and the people it claimed stay in the tree, still marked as theirs. To let the
      family edit those profiles again, a tree keeper (⭐) opens each profile in the app and taps
      **release this claim** (it's recorded who did it and when).
-3. In the app, open ⭐ **Super settings** → **Invites** and delete any invite codes they might
-   still have.
-4. If they were a tree keeper (⭐), check ⭐ Super settings: there must always be at least one other.
+3. In the app, open ⭐ **Tree keeper settings** (on a phone: **⋯** → **Tree keeper settings**) →
+   **Invites** and delete (or **stop**) any invite codes they might still have.
+4. If they were a tree keeper (⭐), check ⭐ Tree keeper settings: there must always be at least one other.
 
 ## 5. A relative forgot their password
 Nothing is ever emailed. A tree keeper (⭐) gives them a one-time **reset code** instead, and they
-keep the same login.
+keep the same login. **They don't need to remember their email** — the code alone finds their login.
 1. In the app, open the relative's card (tap them on the tree, or type their name in search).
-2. Tap **🔑 help … back in** near the top → **OK**. (Only keepers see it, and only on a claimed
-   profile. A card that says "unverified" has no login yet — send an invite instead.)
-3. A code like `K7PM-4XQR` appears. Tap **💬 WhatsApp** and pick the relative, or **copy message**,
-   or read it out on a call. Send it to them only.
-4. They open https://aizattaha.github.io/bear-family-tree/, tap **Forgot your password?**, type
-   their login email, the code and a new password (at least 6 characters), then **Save new
-   password**. They're signed straight in, with everything as before.
+2. Tap **🔑 help … back in** near the top. The question names their household and who is in it
+   (e.g. "Nia's household (Nia Rahman)") — check it's the right person, then **OK**. (Only keepers
+   see it, and only on a claimed profile. A card that says "unverified" has no login yet — send an
+   invite instead.)
+3. A code like `K7PM-4XQR` appears. Tap **💬 WhatsApp** and pick the relative (never a group), or
+   **copy message**, or read it out on a call. Before you send it, make sure it's really them
+   asking — a call, or a message from their usual number.
+4. They open https://aizattaha.github.io/bear-family-tree/, tap **Forgot your password?**, type the
+   code and a new password (at least 6 characters), then **Save new password**. The app shows them
+   **which email their login uses** (so they can write it down) and signs them straight in.
 
 Good to know:
 - A code works **once, for 30 minutes**. Making a new code stops the old one.
-- 5 wrong tries use a code up. 10 failed tries with one email lock that email for 30 minutes —
-  wait, then make a fresh code.
+- 5 wrong tries use a code up. If **20 wrong codes** are tried in half an hour (by anyone),
+  every reset pauses for 30 minutes — wait, then try again (make a fresh code if theirs ran out).
+- At most 3 codes can be waiting in the tree at once.
+- The relative is told: the next time they open the app on any other phone, it says **"your
+  password was reset — a tree keeper from <household> made a reset code … used on <date>"**, and
+  their own card always shows when it was last reset. If they didn't ask for it, they'll tell the
+  family.
 - Anyone else signed in on that login (a shared household login) is signed out and needs the new
   password.
 - Every code is recorded (which keeper, for whom, when, used or not). **Ask Claude:** "Show me the
   Bear Family Tree reset codes made this month."
-- Forgotten which email their login uses? Supabase dashboard → project **bear-family-tree** →
-  **Authentication** → **Users** lists every login's email.
+- A household with two logins can't get a code (the app says so) — **ask Claude**.
 
 ## 6. Invite a relative (QR code or WhatsApp — no emails)
 Only tree keepers (⭐) can invite. An invite is for one person who is already on the tree but
-has no login yet (their card says "unverified").
+has no login yet (their card says "unverified"). Nobody can be invited to take the place of
+someone with a memorial (the button isn't there).
+
+**The rule until the keeper "confirm" step exists:** show the QR code face to face, or send the
+link **to that one person only — never to a group, never at a gathering or on a shared screen.**
+Whoever signs up with it takes the place straight away.
 
 **When they're with you (best):**
 1. Open their card (tap them on the tree, or type their name in search).
@@ -120,27 +146,40 @@ has no login yet (their card says "unverified").
 3. Hold your phone out. They open their phone's **Camera**, point it at the code and tap the
    link that pops up.
 4. On their phone they first see **"Is this you?"** — the name of their place (e.g. "Daughter of
-   Aizat & Paige") and the first names of their close family. They tap **Yes, that's me** (or
-   **not me**, which stops there). Then **Create account** (their email + a password, at least 6 characters) →
-   name their household → **Take my place**. They're in, as themselves.
-5. Your screen shows "✓ scanned — … has until …", then "🎉 … has taken their place on the tree".
+   Aizat & Paige") and the first names of their close family. They tap **Yes, that's me**. Then
+   **Create account** (their email + a password, at least 6 characters) → **Take my place**.
+   They're in, as themselves, and their household is named after them ("Nia's household").
+   If it isn't them, they tap **not me** → **Cancel this invite**: the code stops working at once.
+5. Your screen shows "✓ scanned — … has 10 minutes to finish signing up, until 2:59 pm", then
+   "🎉 … has taken their place on the tree" — or "🚫 … said this isn't them", with a refresh button.
 
 Good to know:
 - The code must be **scanned within 5 minutes**. After that it greys out: tap **↻ refresh** for
   a new one (the old one stops working).
-- Once scanned, they have **30 minutes** to finish signing up — no rush.
-- **Whoever scans it first gets the profile**, so only show it to the right person. If someone
-  else scanned it, tap **not …? cancel this code**, then refresh.
+- Once scanned, they have **10 minutes** to finish signing up.
+- **Whoever signs up with it first gets the profile**, so only show it to the right person. If
+  someone else scanned it, tap **not …? cancel this code**, then refresh.
 - Closing the sheet deletes a code nobody scanned.
 
 **When they're far away:** on the same sheet, under **💬 Not with you? Send a link**, tap
-**make a 14-day link** → **💬 WhatsApp** and pick them (or **copy link** and paste it anywhere).
-The link works once, for 14 days. Send it only to them.
+**make a 14-day link** → **💬 WhatsApp** and pick them — them only, never a group (or **copy
+link**). The link works once, for 14 days. If the wrong person opens it, they tap **not me** and
+it's cancelled; the next time you open the app it tells you, so you can send a new one.
 
-**Anyone in the family (not a particular card):** ⭐ **Super settings** → **Invites** →
-**✉ create** → **💬 WhatsApp**. Whoever uses it then finds themselves on the tree and claims
-their place. ⭐ **Super settings** → **Invites** also lists every link that still works, with
-**delete**.
+**Anyone in the family (not a particular card):** ⭐ **Tree keeper settings** → **Invites** →
+**✉ create** → **💬 WhatsApp** — to one person at a time, never a group chat. Whoever uses it
+then finds themselves on the tree and claims their place. ⭐ **Tree keeper settings** →
+**Invites** lists every invite that still works, with **delete** (or **stop**, once someone has
+joined with it), and **Invites so far** shows the numbers: made, opened, joined, "not me".
+
+**Households:** ⭐ Tree keeper settings lists every household with the people in it, so you can
+tell "Nia's household" from the next. Tap **make keeper** to add a tree keeper (up to 3).
+
+## 7. A friend wants their own, separate tree
+New trees can only be started with a keeper's one-time link (so strangers can't fill the family's
+free database). Open your own card → **Invite a friend to start their own tree** → **✉ share** →
+**💬 WhatsApp** to that friend. The link works once, for 14 days; each login can start one tree,
+and a tree holds up to 5,000 people.
 
 ## Turning the Mac jobs off or on
 In Terminal (⌘ + Space, `Terminal`, Enter):
