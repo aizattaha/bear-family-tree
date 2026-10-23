@@ -25,6 +25,9 @@ site_url = "http://127.0.0.1:8865/"
 [auth.email]
 enable_confirmations = false
 EOF
+# the same Auth version as production (supabase/.temp/gotrue-version on the Mac, 2026-10-24):
+# keeper reset codes write passwords in Auth's own format, so sign-in is tested against it
+mkdir -p "$DIR/supabase/.temp"; printf 'v2.193.0' > "$DIR/supabase/.temp/gotrue-version"
 cp "$REPO/tests/prod-grants.sql" "$DIR/supabase/migrations/20260101000000_test_prod_grants.sql"
 # production's hand-made BearHaus Finance objects, so their clean-up migration is tested for real
 cp "$REPO/tests/prod-finance-drift.sql" "$DIR/supabase/migrations/20260720000000_test_finance_drift.sql"

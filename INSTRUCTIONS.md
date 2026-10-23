@@ -56,10 +56,10 @@ The app is wired to the live Supabase project (`garbnserzkuazmvonfem`). Opening 
 
 **First run (you):**
 1. Open the app → **Create account** with your email + a password.
-2. By default Supabase requires email confirmation — click the link it sends, then sign in. *(To spare the family this step: Supabase Dashboard → Authentication → Sign In / Providers → Email → turn off "Confirm email".)*
+2. No email step: "Confirm email" is switched off (Supabase Dashboard → Authentication → Sign In / Providers → Email), so a new account goes straight in. The app never sends emails — a forgotten password comes back through a tree keeper's one-time reset code (`RUNBOOK.md` §5).
 3. Onboarding → **Start a new family tree** → your name, household name, tree name → you land on a clean tree with just you. Add Sarah and the girls with "Add relative" + **claim** them into your nucleus, then build outward.
 
-**Super users:** the first household of the tree is automatically the super user; up to **3 per tree**. Supers get a **⭐ button in the top bar** → *Super settings*: manage super users (make / remove), create general invite codes, and see / copy / **delete pending invites**. Super users can also **edit every person on the tree** — any profile, relationship, or memorial, claimed or not. Only super users can create invites.
+**Super users:** the first household of the tree is automatically the super user; up to **3 per tree**. Supers get a **⭐ button in the top bar** → *Super settings*: manage super users (make / remove), create general invite codes, and see / copy / **delete pending invites**. Super users can also **edit every person on the tree** — any profile, relationship, or memorial, claimed or not. Only super users can create invites. On a claimed person's card they get **🔑 help … back in**: a one-time code (8 characters, 30 minutes) that lets that household's login choose a new password from the sign-in screen's **Forgot your password?**.
 
 **Inviting family — two ways (super users only):**
 1. **Personal claim-link (the good one):** open any *unclaimed* person's sheet → **✉ invite [name] to claim this profile** → share the link or hit *send by email*. Whoever opens it creates an account and lands directly as that person — single use, valid 14 days.

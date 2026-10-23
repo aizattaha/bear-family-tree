@@ -87,6 +87,29 @@ There's no button for this in the app yet. It's done in Supabase:
    still have.
 4. If they were a tree keeper (⭐), check ⭐ Super settings: there must always be at least one other.
 
+## 5. A relative forgot their password
+Nothing is ever emailed. A tree keeper (⭐) gives them a one-time **reset code** instead, and they
+keep the same login.
+1. In the app, open the relative's card (tap them on the tree, or type their name in search).
+2. Tap **🔑 help … back in** near the top → **OK**. (Only keepers see it, and only on a claimed
+   profile. A card that says "unverified" has no login yet — send an invite instead.)
+3. A code like `K7PM-4XQR` appears. Tap **💬 WhatsApp** and pick the relative, or **copy message**,
+   or read it out on a call. Send it to them only.
+4. They open https://aizattaha.github.io/bear-family-tree/, tap **Forgot your password?**, type
+   their login email, the code and a new password (at least 6 characters), then **Save new
+   password**. They're signed straight in, with everything as before.
+
+Good to know:
+- A code works **once, for 30 minutes**. Making a new code stops the old one.
+- 5 wrong tries use a code up. 10 failed tries with one email lock that email for 30 minutes —
+  wait, then make a fresh code.
+- Anyone else signed in on that login (a shared household login) is signed out and needs the new
+  password.
+- Every code is recorded (which keeper, for whom, when, used or not). **Ask Claude:** "Show me the
+  Bear Family Tree reset codes made this month."
+- Forgotten which email their login uses? Supabase dashboard → project **bear-family-tree** →
+  **Authentication** → **Users** lists every login's email.
+
 ## Turning the Mac jobs off or on
 In Terminal (⌘ + Space, `Terminal`, Enter):
 ```bash

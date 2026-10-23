@@ -233,10 +233,6 @@ const COARSE=matchMedia('(pointer: coarse)').matches;
 /* ================= cloud config ================= */
 const SUPABASE_URL='https://garbnserzkuazmvonfem.supabase.co';
 const SUPABASE_KEY='sb_publishable_I-mPsmgwDuPqc20Y09iZ7g_lL1Z_sBp';
-// read before the client swallows the link: a password-reset email lands
-// here with #…type=recovery (or #error_code=otp_expired once it's stale)
-const RESET_LINK=/type=recovery/.test(location.hash);
-const RESET_EXPIRED=/error_code=otp_expired|error=access_denied/.test(location.hash);
 let sb=null; try{ sb=window.supabase?.createClient(SUPABASE_URL,SUPABASE_KEY,
   {auth:{lock:(_n,_t,fn)=>fn()}}); }catch(e){} // no-op lock: navigator.locks hangs on file:// pages
 const APP_URL='https://aizattaha.github.io/bear-family-tree/'; // the family's home — invite links point here
@@ -406,9 +402,9 @@ const isNetErr=e=>!!e&&(e.name==='AuthRetryableFetchError'||
   /failed to fetch|load failed|networkerror|network request failed|timed out/i.test(String(e.message||e)));
 // sign-in problems in plain words — the library's own text ("invalid login credentials") means nothing to Granny
 const AUTH_MSGS=[
-  [/invalid_credentials|invalid login credentials/i,`that email and password don't match — check for a typo, or tap "forgot password?"`],
-  [/email_not_confirmed|email not confirmed/i,'please confirm your email first — open the link we emailed you (check spam too), then sign in'],
-  [/user_already_exists|already registered|already been registered/i,`there's already an account with that email — sign in instead, or tap "forgot password?"`],
+  [/invalid_credentials|invalid login credentials/i,`that email and password don't match — check for a typo, or tap "Forgot your password?"`],
+  [/email_not_confirmed|email not confirmed/i,"this login isn't switched on yet — please message the family and a tree keeper (⭐) will sort it out"],
+  [/user_already_exists|already registered|already been registered/i,`there's already an account with that email — sign in instead, or tap "Forgot your password?"`],
   [/email_address_invalid|invalid format|validate email|invalid email/i,"that doesn't look like an email address — please check it"],
   [/same_password|should be different/i,"that's your current password — choose a different one"],
   [/weak_password|password should (be at least|contain)|password is known|too weak/i,'please choose a longer password — at least 6 characters, and not an easy one to guess'],
@@ -1076,9 +1072,10 @@ function renderTutorial(){
 // the WhatsApp link only pre-fills a message — the person picks the family chat
 // themselves, so no phone number lives in this (public) code
 const WA_LINK='https://wa.me/?text='+encodeURIComponent('Bear Family Tree 🐻 — I need a hand with: ');
+const WA_RESET='https://wa.me/?text='+encodeURIComponent("Bear Family Tree 🐻 — I've forgotten my password. Could a tree keeper send me a reset code, please?");
 function openHelp(){
   const faqs=[
-    ['I forgot my password',`Sign out (at the bottom of your own card), tap <b>forgot password?</b> and type your email. A link arrives by email — check spam too — and lets you choose a new password. No email after 10 minutes? Message the family below and a tree keeper will help.`],
+    ['I forgot my password',`Ask a tree keeper (⭐) for a reset code — message the family below. Then on the sign-in screen tap <b>Forgot your password?</b> and type your login email, the code and a new password. You keep the same login; a code works once, for 30 minutes. <i>Keepers:</i> open their card and tap <b>🔑 help … back in</b>.`],
     ["How do I open someone's card?",COARSE?`<b>Tap</b> them on the tree. Or type their name in <b>search the family…</b> at the top.`
       :`<b>Double-click</b> them on the tree (one click shows the ＋). Or type their name in <b>search the family…</b> at the top.`],
     ['How do I add a child, parent or partner?',`Open the person's card, tap <b>Add relative</b>, type the name, then choose how they're connected — parent, partner, child or sibling — and tap <b>Save</b>.`],
@@ -1195,6 +1192,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
         <div class="cap2" style="color:var(--primary);">${claimedLabel}</div></div></div>
     ${!per.claimedBy?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="claimPerson('${pid}')">claim — this is me / in my nucleus</button>`:''}
     ${!per.claimedBy&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="invitePerson('${pid}')">✉ invite ${esc(displayName(pid))} to claim this profile</button>`:''}
+    ${per.claimedBy&&per.claimedBy!==S.session.nucleusId&&isSuper()?`<button class="btn secondary" style="width:100%;margin-bottom:12px;" onclick="helpBackIn('${pid}')">🔑 help ${esc(displayName(pid))} back in</button>`:''}
     <div class="card"><div class="label">You call ${per.passed?'them':'them'}</div>
       <div class="bignick"><input id="mynick" value="${esc(nickFor(pid))}" placeholder="${esc(goesBy(pid))}">
         <button class="link" onclick="saveNick('${pid}')">save</button></div>
@@ -1337,6 +1335,28 @@ window.releaseClaimUI=async(pid)=>{ const per=person(pid); if(!per||!per.claimed
   const was=per.claimedBy; per.claimedBy=null;
   save(); rebuild(); openPerson(pid); toast('claim released — '+per.name);
   if(!await db.releaseClaim(pid)){ per.claimedBy=was; undone(pid); } };
+// tree keepers only: nothing is emailed, so a forgotten password comes back this way —
+// a one-time code for that household's login, which they type on the sign-in screen
+window.helpBackIn=async(pid)=>{ const per=person(pid); if(!per||!per.claimedBy||!isSuper())return;
+  const house=S.nuclei[per.claimedBy]?.label||'their household', nm=displayName(pid);
+  if(!confirm(`Make a reset code for the login of ${house}?\n\nUse it when ${nm} has forgotten the password. Send it only to ${nm} — whoever has it can choose a new password for that login. It works once, for 30 minutes, and anyone else signed in on that login will need the new password too.`))return;
+  let res; try{ res=await withTimeout(sb.rpc('issue_reset_code',{p:pid})); }catch(e){ dbErr(e); return; }
+  if(res.error){ toast("couldn't make a code — "+String(res.error.message||'please try again').toLowerCase(),6000); return; }
+  resetCodeDialog(res.data.code,new Date(res.data.expires_at),nm,house); };
+function resetCodeDialog(code,until,nm,house){
+  const shown=code.slice(0,4)+'-'+code.slice(4), at=until.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+  const text=`Bear Family Tree 🐻 — your password reset code is ${shown}\n\nOpen ${APP_URL} , tap "Forgot your password?", then type your login email, this code and a new password. The code works once, until ${at}.`;
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">🔑 Reset code — ${esc(nm)}</h3>
+    <div class="card"><div class="label">For the login of ${esc(house)}</div>
+      <div class="bignick" style="justify-content:center;"><span class="v" id="rc_code" style="font-size:30px;letter-spacing:3px;">${esc(shown)}</span></div>
+      <div class="cap2" style="text-align:center;margin-top:6px;">works once · until ${esc(at)} (30 minutes)</div></div>
+    <div class="btnrow">
+      <a class="btn secondary" id="rc_wa" href="https://wa.me/?text=${encodeURIComponent(text)}" target="_blank" rel="noopener" style="text-decoration:none;">💬 WhatsApp</a>
+      <button class="btn primary" id="rc_copy">copy message</button></div>
+    <p class="cap2" style="margin-top:10px;">Send it only to ${esc(nm)} — or read it out on a call. On the sign-in screen they tap <b>Forgot your password?</b> and type their login email, this code and a new password. They keep the same login. Making another code stops this one.</p>`);
+  document.getElementById('rc_copy').onclick=async()=>{
+    try{ await navigator.clipboard.writeText(text); toast('message copied — paste it to '+nm); }
+    catch(e){ prompt('copy the message:',text); } }; }
 // Born is a year or a full date — the database refuses anything else, so say so here first
 function bornOk(b){ if(!b||BORN_RE.test(b))return true;
   toast('born should be a year like 1950, or a full date like 1950-06-04',5000); return false; }
@@ -1639,46 +1659,42 @@ function renderOffline(retry){ MODE='demo';
     <div class="cap" style="margin-bottom:14px;">Check your internet, or try again in a few minutes.</div>
     <button class="btn primary" style="width:100%;" id="off_retry">Try again</button>`);
   document.getElementById('off_retry').onclick=retry||(()=>location.reload()); }
+// nothing is emailed: a tree keeper makes a one-time code on the person's card
+// (🔑 help … back in) and they choose a new password here — same login as before
+const RESET_MSGS={
+  no:"that email and code don't match — check both for typos. A code works once, for 30 minutes; if yours is older, ask the keeper for a new one.",
+  locked:'too many tries with that email — please wait 30 minutes, then ask the keeper for a new code',
+  short:'please choose a longer password — at least 6 characters',
+  long:'that password is too long — 72 characters at most'};
 function renderForgot(prefill){
   loginCard(`<h1>Forgot your password?</h1>
-    <div class="cap">type your login email — we'll send you a link to choose a new password</div>
-    <form id="fp_form" name="forgot" method="post" action="#">
-      <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="fp_email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(prefill||'')}"></div>
+    <div class="cap">ask a family keeper (⭐) for a reset code — they make one from your card on the tree. Then fill this in:</div>
+    <form id="fp_form" name="reset" method="post" action="#">
+      <div class="fld" style="text-align:left;"><span class="flabel">Your login email</span><input id="fp_email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(prefill||'')}"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">Reset code from the keeper</span><input id="fp_code" name="one-time-code" autocomplete="one-time-code" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="16" placeholder="8 letters and numbers"></div>
+      <div class="fld" style="text-align:left;"><span class="flabel">New password · at least 6 characters</span><input id="fp_pass" name="new-password" type="password" autocomplete="new-password"></div>
       <div id="fp_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
-      <button type="submit" class="btn primary" style="width:100%;">Send reset link</button>
+      <button type="submit" class="btn primary" style="width:100%;">Save new password</button>
     </form>
+    <div class="btnrow"><a class="btn secondary" href="${WA_RESET}" target="_blank" rel="noopener" style="text-decoration:none;">💬 Ask the family on WhatsApp</a></div>
     <button class="link" id="fp_back" style="margin-top:12px;">back to sign in</button>`);
   const msg=t=>{document.getElementById('fp_msg').textContent=t;};
-  document.getElementById('fp_back').onclick=()=>renderLogin(false,document.getElementById('fp_email').value.trim());
+  const val=id=>document.getElementById(id).value;
+  document.getElementById('fp_back').onclick=()=>renderLogin(false,val('fp_email').trim());
   document.getElementById('fp_form').onsubmit=async e=>{ e.preventDefault();
-    const email=document.getElementById('fp_email').value.trim();
-    if(!email){msg('your email, please');return;}
+    const email=val('fp_email').trim(), code=val('fp_code').trim(), password=val('fp_pass');
+    if(!email||!code||!password){msg('your login email, the code and a new password, please');return;}
+    if(password.length<6){msg(RESET_MSGS.short);return;}
     if(!sb){renderOffline();return;}
-    msg('sending…');
-    try{ const {error}=await withTimeout(sb.auth.resetPasswordForEmail(email,{redirectTo:APP_URL}));
-      if(error)throw error; }
-    catch(e){ if(isNetErr(e)){renderOffline(()=>renderForgot(email));return;}
-      msg(authMsg(e,'could not send the link')); return; }
-    msg("if that email has a login, a reset link is on its way — open it on this phone or computer. It can take a few minutes; check spam too."); }; }
-let RECOVERING=RESET_LINK; // arrived from a reset email → choose a new password before anything else
-function renderNewPassword(){ RECOVERING=true;
-  loginCard(`<h1>Choose a new password</h1>
-    <div class="cap">you came from a reset link — pick a new password for your login</div>
-    <form id="np_form" name="reset" method="post" action="#">
-      <div class="fld" style="text-align:left;"><span class="flabel">New password</span><input id="np_pass" name="new-password" type="password" autocomplete="new-password"></div>
-      <div id="np_msg" class="cap" style="min-height:18px;margin-bottom:8px;"></div>
-      <button type="submit" class="btn primary" style="width:100%;">Save new password</button>
-    </form>`);
-  const msg=t=>{document.getElementById('np_msg').textContent=t;};
-  document.getElementById('np_form').onsubmit=async e=>{ e.preventDefault();
-    const password=document.getElementById('np_pass').value;
-    if(password.length<6){msg('password needs at least 6 characters');return;}
-    msg('saving…');
-    try{ const {error}=await withTimeout(sb.auth.updateUser({password})); if(error)throw error; }
-    catch(e){ if(isNetErr(e)){renderOffline(renderNewPassword);return;}
-      msg(authMsg(e,'could not save the password')); return; }
-    RECOVERING=false;
-    try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
+    msg('checking the code…');
+    let data,error; try{ ({data,error}=await withTimeout(sb.rpc('redeem_reset_code',
+      {login_email:email,reset_code:code,new_password:password}))); }catch(e){ error=e; }
+    if(error&&isNetErr(error)){renderOffline(()=>renderForgot(email));return;}
+    if(error){msg(authMsg(error,'could not check the code'));return;}
+    if(data!=='ok'){msg(RESET_MSGS[data]||RESET_MSGS.no);return;}
+    msg('new password saved — signing you in…');
+    try{ ({error}=await withTimeout(sb.auth.signInWithPassword({email,password}))); }catch(e){ error=e; }
+    if(error){ renderLogin(false,email,'new password saved — please sign in with it'); return; }
     toast('password changed — welcome back 🐻',4000); enterCloud(); }; }
 function renderLogin(signup,prefillEmail,note){
   if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
@@ -1694,7 +1710,7 @@ function renderLogin(signup,prefillEmail,note){
       <div id="au_msg" class="cap" style="min-height:18px;margin-bottom:8px;">${esc(note||'')}</div>
       <button type="submit" class="btn primary" style="width:100%;" id="${signup?'au_up':'au_in'}">${signup?'Create account':'Sign in'}</button>
     </form>
-    ${signup?'':'<button class="link" id="au_forgot" style="margin-top:12px;display:block;margin-left:auto;margin-right:auto;">forgot password?</button>'}
+    ${signup?'':'<button class="link" id="au_forgot" style="margin-top:12px;display:block;margin-left:auto;margin-right:auto;line-height:19px;">Forgot your password?<br><span style="font-weight:400;">Ask a family keeper for a reset code</span></button>'}
     <button class="link" id="au_sw" style="margin-top:12px;">${signup?'already have an account? sign in':'new here? create an account'}</button>
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
@@ -1714,9 +1730,12 @@ function renderLogin(signup,prefillEmail,note){
     msg('creating account…');
     let data,error; try{ ({data,error}=await withTimeout(sb.auth.signUp(c))); }catch(e){ error=e; }
     if(error&&isNetErr(error)){renderOffline(back(c.email));return;}
-    if(error)msg(authMsg(error,'sign-up failed'));
-    else if(!data.session)msg('account created — check your email to confirm, then sign in');
-    else enterCloud(); };
+    if(error){ msg(authMsg(error,'sign-up failed')); return; }
+    if(data.session){ enterCloud(); return; }
+    // no emails here, so no "confirm your email" step: sign straight in (if the
+    // project still asked for a confirmation, this says so in plain words)
+    try{ ({error}=await withTimeout(sb.auth.signInWithPassword(c))); }catch(e){ error=e; }
+    if(error)msg(authMsg(error,'account created, but signing in failed')); else enterCloud(); };
   // a real <form> with ONE purpose per view: Safari autofills saved
   // credentials on sign-in, and suggests strong passwords only on sign-up
   document.getElementById('au_form').onsubmit=e=>{ e.preventDefault(); (signup?doUp:doIn)(); };
@@ -1897,18 +1916,12 @@ function stampSeen(){ if(MODE==='cloud'&&ME.userId)
   try{ localStorage.setItem('bft.lastSeen.'+ME.userId,String(Date.now())); }catch(e){} }
 async function boot(){ S=blankState();
   if(sb)sb.auth.onAuthStateChange(ev=>{
-    if(ev==='PASSWORD_RECOVERY'){ if(!document.getElementById('np_form'))renderNewPassword(); }
-    else if(ev==='SIGNED_OUT'&&MODE==='cloud'){ // the sign-in ended elsewhere (expired, revoked)
+    if(ev==='SIGNED_OUT'&&MODE==='cloud'){ // the sign-in ended elsewhere (expired, revoked, password reset)
       MODE='demo'; renderLogin(false,'','you were signed out — please sign in again'); } });
-  const STALE_LINK='that reset link has expired or was already used — tap "forgot password?" for a fresh one';
-  if(RESET_EXPIRED)try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
-  renderLogin(undefined,'',RESET_EXPIRED?STALE_LINK:''); // always paint immediately — never gate first paint on the network
+  renderLogin(); // always paint immediately — never gate first paint on the network
   if(sb){ try{ const {data,error}=await Promise.race([ sb.auth.getSession(),
       new Promise(res=>setTimeout(()=>res({data:{session:null}}),4000)) ]);
     if(error&&isNetErr(error)&&!DEMO_CHOSEN&&MODE!=='cloud'){ renderOffline(); return; }
-    if(RECOVERING){ if(data&&data.session){ if(!document.getElementById('np_form'))renderNewPassword(); }
-      else renderLogin(false,'',STALE_LINK);
-      return; }
     // resume the saved sign-in, unless someone already chose the demo or signed in by hand
     if(data&&data.session&&!DEMO_CHOSEN&&MODE!=='cloud'){
       const uid=data.session.user&&data.session.user.id;

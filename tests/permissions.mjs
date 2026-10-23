@@ -3,7 +3,8 @@
 //   1. safety release (2026-10-21): the 40 original checks
 //   2. "only us" nicknames (2026-10-21): the 33 original checks
 //   3. launch gate (2026-10-23): kinship, remove_person, release_claim, timestamps
-//   4. catalog: search_path + who may call which function
+//   4. keeper reset codes (2026-10-24): who may make one, redeeming, real sign-in after, limits
+//   5. catalog: search_path + who may call which function, Finance leftovers gone
 // env: SUPABASE_URL, SUPABASE_KEY (publishable), DB_CONTAINER (the stack's db container)
 // usage: node permissions.mjs        (exit code 1 if anything fails)
 import { createClient } from '@supabase/supabase-js';
@@ -27,7 +28,8 @@ const asUser = (c, q) => sqlErr(`begin; set local role authenticated; set local 
 const client = () => createClient(URL, KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 async function user(tag) {
   const c = client();
-  const { data, error } = await c.auth.signUp({ email: `${tag}.${run}@test.invalid`, password: randomBytes(12).toString('hex') });
+  c.email = `${tag}.${run}@test.invalid`; c.password = randomBytes(12).toString('hex');
+  const { data, error } = await c.auth.signUp({ email: c.email, password: c.password });
   if (error) throw error; c.uid = data.user.id; return c;
 }
 const nucOf = async c => (await c.from('account').select('nucleus_id')).data[0]?.nucleus_id;
@@ -340,7 +342,137 @@ check('nickname upsert: stamped, and the second save only moves updated_at', !r.
 r = await B.from('memorial').upsert({ person_id: pT, tree_id: treeA, passed_on: '1999', style_id: 'gen1' }).select('person_id');
 check('memorial: stamped with its author', !r.error && stamp('memorial', `person_id='${pT}'`).startsWith(`true/${B.uid}/`), r.error?.message);
 
-/* ============ 4. catalog: search_path + who may call what ============ */
+/* ============ 4. keeper reset codes (2026-10-24) ============ */
+section = '[reset] ';
+{
+  // K keeps the tree; R and O are two other households in it; X keeps a different tree
+  const K = await user('k'), R = await user('r'), O = await user('o'), X = await user('x');
+  r = await K.rpc('create_tree', { nucleus_label: 'K house', tree_nm: 'K tree' });
+  const tree = r.data, nucK = await nucOf(K);
+  const pK = randomUUID(), pR = randomUUID(), pO = randomUUID(), pU = randomUUID();
+  r = await K.from('person').insert([{ id: pK, tree_id: tree, full_name: 'Test Keeper', claimed_by: nucK },
+    { id: pR, tree_id: tree, full_name: 'Test Relative' }, { id: pO, tree_id: tree, full_name: 'Test Other' },
+    { id: pU, tree_id: tree, full_name: 'Test Unclaimed' }]);
+  check('setup: people added', !r.error, r.error?.message);
+  for (const [c, pid, lab] of [[R, pR, 'R house'], [O, pO, 'O house']]) {
+    const inv = await K.from('tree_invite').insert({ tree_id: tree, person_id: pid }).select('code').single();
+    r = await c.rpc('join_with_invite', { invite_code: inv.data.code, nucleus_label: lab, tree_nm: lab });
+    check(`setup: ${lab} joins and claims their profile`, !r.error && r.data?.person_id === pid, r.error?.message);
+  }
+  r = await X.rpc('create_tree', { nucleus_label: 'X house', tree_nm: 'X tree' });
+  check('setup: X keeps a tree of its own', !r.error && isSuper(X), r.error?.message);
+  const nucR = await nucOf(R);
+  const issue = (c, p) => c.rpc('issue_reset_code', { p });
+  const redeem = (email, code, pw, c = anon) => c.rpc('redeem_reset_code', { login_email: email, reset_code: code, new_password: pw });
+  const signIn = (email, password) => client().auth.signInWithPassword({ email, password });
+  const lastId = () => sql(`select max(id) from password_reset where nucleus_id='${nucR}'`).trim();
+  const rec = id => sql(`select attempts||'/'||(used_at is not null)||'/'||(revoked_at is not null) from password_reset where id=${id}`).trim();
+  const hashOf = u => sql(`select encrypted_password from auth.users where id='${u}'`).trim();
+  const sessions = u => sql(`select count(*) from auth.sessions where user_id='${u}'`).trim();
+
+  // who may make a code
+  r = await issue(O, pR);
+  check('a member who isn\'t a keeper cannot make a code', !!r.error, r.error?.message || 'made one');
+  r = await issue(anon, pR);
+  check('a signed-out visitor cannot make a code', !!r.error, r.error?.message || 'made one');
+  r = await issue(X, pR);
+  check('a keeper of another tree cannot make a code for this tree', !!r.error, r.error?.message || 'made one');
+  r = await issue(K, pU);
+  check('no code for an unclaimed profile (there is no login to open)', !!r.error, r.error?.message || 'made one');
+  const none = sql(`select count(*) from password_reset where tree_id='${tree}'`).trim();
+  check('…and none of those left a code behind', none === '0', none);
+  r = await issue(K, pR);
+  const code1 = r.data?.code, id1 = lastId();
+  check('the keeper makes a code: 8 characters, none that look alike', !r.error && /^[2-9A-HJKMNP-Z]{8}$/.test(code1 || ''), r.error?.message || code1);
+  const mins = (new Date(r.data?.expires_at) - Date.now()) / 60000;
+  check('…that lasts 30 minutes', mins > 29 && mins <= 30.1, mins.toFixed(1) + ' min');
+  const stored = sql(`select row_to_json(p)::text from password_reset p where id=${id1}`);
+  check('…stored only as a bcrypt hash (the code itself is nowhere in the record)', /"code_hash":"\$2a\$/.test(stored) && !stored.includes(code1));
+  const who = sql(`select (tree_id='${tree}')||'/'||(nucleus_id='${nucR}')||'/'||(person_id='${pR}')||'/'||(created_by='${K.uid}')||'/'||(created_by_nucleus='${nucK}') from password_reset where id=${id1}`).trim();
+  check('…and recorded: which tree, which household, from whose card, by which keeper', who === 'true/true/true/true/true', who);
+  for (const [lab, c] of [['the keeper', K], ['a signed-out visitor', anon]]) {
+    r = await c.from('password_reset').select('id');
+    check(`${lab} cannot read the codes through the API`, !!r.error, r.error?.message || 'rows=' + r.data.length);
+    r = await c.from('password_reset_failure').select('email_hash');
+    check(`${lab} cannot read the failed tries through the API`, !!r.error, r.error?.message || 'rows=' + r.data.length);
+  }
+
+  // redeeming: one answer for every kind of failure
+  r = await redeem(R.email, 'WRONG234', 'new-password-1');
+  check('wrong code → "no"', r.data === 'no', r.error?.message || r.data);
+  check('…counted on the code (1 wrong try)', rec(id1) === '1/false/false', rec(id1));
+  r = await redeem(`nobody.${run}@test.invalid`, code1, 'new-password-1');
+  check('an email with no login → the same "no"', r.data === 'no', r.error?.message || r.data);
+  r = await redeem(O.email, code1, 'new-password-1');
+  check('another household\'s login with this code → the same "no"', r.data === 'no', r.error?.message || r.data);
+  check('…and that household\'s password still works', !(await signIn(O.email, O.password)).error);
+  r = await redeem(R.email, code1, '12345');
+  check('a new password under 6 characters → "short", and the code is not used up', r.data === 'short' && rec(id1) === '1/false/false', r.data);
+  r = await redeem(R.email, code1, 'x'.repeat(73));
+  check('a new password over 72 characters → "long"', r.data === 'long', r.data);
+  const oldHash = hashOf(R.uid), before = sessions(R.uid);
+  r = await redeem('  ' + R.email.toUpperCase() + ' ', code1.slice(0, 4).toLowerCase() + '-' + code1.slice(4), 'new-password-1');
+  check('the right code (lower case, with a dash; email in capitals) → "ok"', r.data === 'ok', r.error?.message || r.data);
+  check('the new password is stored the way Supabase Auth stores them (bcrypt, cost 10)', /^\$2a\$10\$/.test(hashOf(R.uid)) && hashOf(R.uid) !== oldHash, hashOf(R.uid).slice(0, 7));
+  check('every earlier sign-in of that login has ended', before !== '0' && sessions(R.uid) === '0', `${before} → ${sessions(R.uid)}`);
+  r = await R.auth.refreshSession();
+  check('…so an old sign-in cannot carry on', !!r.error, r.error?.message || 'refreshed');
+  r = await signIn(R.email, R.password);
+  check('the old password no longer signs in', !!r.error, r.error?.message || 'signed in');
+  r = await signIn(R.email, 'new-password-1');
+  check('the new password signs in through Supabase Auth — the SAME login', !r.error && r.data.user?.id === R.uid, r.error?.message);
+  const R2 = client(); await R2.auth.setSession(r.data.session);
+  check('…landing in the same household and tree', await nucOf(R2) === nucR && treeOf(R) === tree);
+  check('the code is marked used, by that login', sql(`select (used_at is not null)||'/'||(used_by='${R.uid}') from password_reset where id=${id1}`).trim() === 'true/true');
+  r = await redeem(R.email, code1, 'new-password-2');
+  check('a code works only once', r.data === 'no', r.data);
+
+  // a newer code replaces the older one; 5 wrong tries burn a code
+  const code2 = (await issue(K, pR)).data?.code, id2 = lastId();
+  const code3 = (await issue(K, pR)).data?.code, id3 = lastId();
+  check('making a new code stops the previous one', rec(id2) === '0/false/true' && rec(id3) === '0/false/false', `${rec(id2)} · ${rec(id3)}`);
+  r = await redeem(R.email, code2, 'new-password-2');
+  check('…the replaced code gets "no"', r.data === 'no', r.data);
+  for (let i = 0; i < 4; i++) await redeem(R.email, 'WRONG23' + (i + 2), 'new-password-2');
+  check('5 wrong tries burn the code', rec(id3) === '5/false/true', rec(id3));
+  r = await redeem(R.email, code3, 'new-password-2');
+  check('…after which even the right code gets "no"', r.data === 'no' && !(await signIn(R.email, 'new-password-1')).error, r.data);
+
+  // 10 failures for one email in 30 minutes lock it — the same with or without a login
+  sql(`delete from password_reset_failure`); // count from zero: R has no live code now (the last one burned)
+  const tries = [];
+  for (let i = 0; i < 10; i++) tries.push((await redeem(R.email, 'WRONG234', 'new-password-2')).data);
+  const code4 = (await issue(K, pR)).data?.code, id4 = lastId();
+  r = await redeem(R.email, code4, 'new-password-2');
+  check('10 failures for one email in 30 minutes → "locked", even with a fresh, right code',
+    tries.every(a => a === 'no') && r.data === 'locked' && rec(id4) === '0/false/false', `${tries.join(',')} → ${r.data} · ${rec(id4)}`);
+  const ghost = `ghost.${run}@test.invalid`, answers = [];
+  for (let i = 0; i < 11; i++) answers.push((await redeem(ghost, 'WRONG234', 'new-password-2')).data);
+  check('an email with no login locks the same way (10 × "no", then "locked")', answers.slice(0, 10).every(a => a === 'no') && answers[10] === 'locked', answers.join(','));
+  check('failed tries are kept as a hash, never the email typed',
+    sql(`select count(*) from password_reset_failure where email_hash !~ '^[0-9a-f]{64}$'`).trim() === '0' && Number(sql(`select count(*) from password_reset_failure`)) === 2);
+  sql(`update password_reset_failure set window_start = now() - interval '31 minutes'`); // 30 minutes later
+  r = await redeem(R.email, code4, 'new-password-2');
+  check('after 30 minutes the email may try again — and the code still works', r.data === 'ok' && !(await signIn(R.email, 'new-password-2')).error, r.data);
+
+  // expired; signed in; many guesses at once
+  const code5 = (await issue(K, pR)).data?.code, id5 = lastId();
+  sql(`update password_reset set expires_at = now() - interval '1 second' where id=${id5}`);
+  r = await redeem(R.email, code5, 'new-password-3');
+  check('an expired code → "no"', r.data === 'no' && rec(id5) === '0/false/false', `${r.data} · ${rec(id5)}`);
+  r = await redeem(R.email, 'WRONG234', 'new-password-3', K);
+  check('the reset screen still works with a stale sign-in in the browser', r.data === 'no', r.error?.message || r.data);
+  const code6 = (await issue(K, pR)).data?.code, id6 = lastId();
+  sql(`delete from password_reset_failure`);
+  const burst = await Promise.all(Array.from({ length: 20 }, (_, i) => redeem(R.email, 'GUESS' + String(222 + i), 'new-password-3')));
+  const tally = {}; burst.forEach(x => { const k = x.data || x.error?.message; tally[k] = (tally[k] || 0) + 1; });
+  check('20 guesses at the same moment: only 5 count against the code, then it is burned and the email locks',
+    rec(id6) === '5/false/true' && tally.no === 10 && tally.locked === 10, `${rec(id6)} · ${JSON.stringify(tally)}`);
+  r = await redeem(R.email, code6, 'new-password-3');
+  check('…none of them got in, and the password is unchanged', r.data === 'locked' && !(await signIn(R.email, 'new-password-2')).error, r.data);
+}
+
+/* ============ 5. catalog: search_path + who may call what ============ */
 section = '[catalog] ';
 const rows = q => sql(q).trim().split('\n').filter(Boolean);
 // production's hand-made BearHaus Finance objects (stand-ins: tests/prod-finance-drift.sql) are removed by upgrade 8
@@ -354,14 +486,15 @@ const unpinned = rows(`select proname from pg_proc where pronamespace='public'::
 check('every SECURITY DEFINER function pins its search_path', unpinned.length === 0, unpinned.join(', '));
 const callable = role => rows(`select proname from pg_proc where pronamespace='public'::regnamespace
   and has_function_privilege('${role}', oid, 'execute') order by 1`).join(',');
-check('signed-out visitors (anon) can call only invite_preview', callable('anon') === 'invite_preview', callable('anon'));
-const WANT = 'branch_distance,claim_person,create_tree,in_tree,invite_preview,is_super_user,join_with_invite,my_nucleus,release_claim,remove_person,set_super';
+check('signed-out visitors (anon) can call only invite_preview and redeem_reset_code', callable('anon') === 'invite_preview,redeem_reset_code', callable('anon'));
+const WANT = 'branch_distance,claim_person,create_tree,in_tree,invite_preview,is_super_user,issue_reset_code,join_with_invite,my_nucleus,redeem_reset_code,release_claim,remove_person,set_super';
 check('signed-in users can call only what the app and the row rules need', callable('authenticated') === WANT, callable('authenticated'));
 const pub = rows(`select proname from pg_proc where pronamespace='public'::regnamespace
   and exists (select 1 from aclexplode(coalesce(proacl, acldefault('f', proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE')`);
 check('no function is open to PUBLIC', pub.length === 0, pub.join(', '));
 for (const [fn, args] of [['create_tree', { nucleus_label: 'x', tree_nm: 'x' }], ['claim_person', { p: pA }], ['set_super', { target: nucA, flag: true }],
-  ['join_with_invite', { invite_code: codeGeneral, nucleus_label: 'x', tree_nm: 'x' }], ['my_tree', {}], ['branch_distance', { p: pA }]]) {
+  ['join_with_invite', { invite_code: codeGeneral, nucleus_label: 'x', tree_nm: 'x' }], ['my_tree', {}], ['branch_distance', { p: pA }],
+  ['issue_reset_code', { p: pA }]]) {
   r = await anon.rpc(fn, args);
   check(`signed-out visitor calling ${fn} is refused`, !!r.error, r.error?.message || 'ran');
 }

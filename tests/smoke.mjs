@@ -72,6 +72,8 @@ await guard('desktop', async () => {
   await page.click('#helpBtn');
   const href = await page.getAttribute('#sheetbody a[href^="https://wa.me/"]', 'href');
   check('help: 5 questions', await page.locator('#sheetbody .faq').count() === 5);
+  const forgotFaq = await page.textContent('#sheetbody .faq:first-of-type p');
+  check('help: "I forgot my password" points to a keeper\'s reset code, not an email', /reset code/.test(forgotFaq) && !/by email|check spam/i.test(forgotFaq), forgotFaq);
   check('help: WhatsApp link pre-fills a message and has no phone number', /^https:\/\/wa\.me\/\?text=/.test(href || '') && !/\d{6,}/.test(decodeURIComponent(href || '')), href);
   await closeSheet(page);
   // a new card starts at the top, even after the last one was scrolled
@@ -123,6 +125,34 @@ await guard('phone', async () => {
   check('phone: the demo never contacted Supabase', supabase.length === 0, supabase.join(' | '));
   await ctx.close();
 });
+
+// ---------- sign-in screen: no emails — a keeper's one-time reset code ----------
+for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }],
+  ['phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+  await guard(`forgot (${label})`, async () => {
+    const ctx = await browser.newContext(opts), page = await ctx.newPage(), errors = [], supabase = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.route(/supabase\.co/, r => { supabase.push(r.request().url()); r.abort(); });
+    await page.goto(BASE);
+    check(`forgot (${label}): sign-in offers "ask a family keeper for a reset code"`, /Ask a family keeper for a reset code/.test(await page.textContent('#au_forgot')));
+    await page.click('#au_forgot');
+    check(`forgot (${label}): email + code + new password, and nothing about emails`,
+      await page.locator('#fp_email').count() === 1 && await page.locator('#fp_code').count() === 1 && await page.locator('#fp_pass').count() === 1
+      && !/reset link|we'll send|check spam|emailed/i.test(await page.textContent('#login')));
+    const wa = await page.getAttribute('#login a[href^="https://wa.me/"]', 'href');
+    check(`forgot (${label}): "ask the family" WhatsApp link has no phone number`, /^https:\/\/wa\.me\/\?text=.*reset%20code/.test(wa || '') && !/\d{6,}/.test(decodeURIComponent(wa || '')), wa);
+    if (label === 'phone') {
+      const small = await page.evaluate(() => [...document.querySelectorAll('#login input')].filter(el => parseFloat(getComputedStyle(el).fontSize) < 16).map(el => el.id));
+      check('forgot (phone): its text boxes are ≥ 16px, so iPhone never zooms in', small.length === 0, small.join(', '));
+    }
+    await page.fill('#fp_email', 'someone@example.com'); await page.fill('#fp_code', 'ABCD-EFGH'); await page.fill('#fp_pass', 'abc');
+    await page.click('#fp_form button[type=submit]');
+    check(`forgot (${label}): a password under 6 characters is caught before anything is sent`,
+      /at least 6 characters/.test(await page.textContent('#fp_msg')) && supabase.length === 0, supabase.join(' | '));
+    check(`forgot (${label}): no errors in the page`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  });
+}
 
 await browser.close(); server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
