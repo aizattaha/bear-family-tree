@@ -392,15 +392,22 @@ check('no "mailto:" left anywhere in the app', !/mailto:/i.test(APP_SRC));
 // ---------- "Is this you?": a personal invite shows the family before the sign-up form ----------
 await guard('is this you', async () => {
   const answer = { name: 'Daughter of Aizat & Sarah', kind: 'qr', expires_at: new Date(Date.now() + 18e5).toISOString(), seconds: 1800,
-    family: { parents: ['Aizat', 'Sarah'], siblings: ['Alya', 'Aisha'] } };
+    family: { parents: ['Aizat', 'Sarah'], siblings: ['Alya', 'Aisha', 'Bella', 'Cinta', 'Dewi', 'Emma'], partners: ['Danish'], children: ['Iman'] }, unknown: true };
   const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }), page = await ctx.newPage(), errors = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.route(/supabase\.co/, r => /rpc\/open_invite/.test(r.request().url()) ? r.fulfill({ json: answer }) : r.abort());
   await page.goto(BASE + '#invite=abcdefabcdef');
   await page.waitForSelector('#inv_yes', { timeout: 3000 });
   const card = (await page.textContent('#inv_who')).replace(/\s+/g, ' ');
-  check('is this you: the card names the place and the family (first names)', /Is this you\?/i.test(card) && /Daughter of Aizat & Sarah/.test(card)
-    && /Parents Aizat, Sarah/.test(card) && /Brothers & sisters Alya, Aisha/.test(card), card);
+  const tree = await page.evaluate(() => { const s = document.querySelector('#inv_who svg.minitree'), b = s && s.getBoundingClientRect(), box = s && s.parentElement.getBoundingClientRect();
+    return s && { label: s.getAttribute('aria-label'), texts: [...s.querySelectorAll('text')].map(t => t.textContent), circles: s.querySelectorAll('circle').length,
+      dashed: s.querySelectorAll('circle[stroke-dasharray]').length, lines: s.querySelectorAll('line').length, fits: b.width <= box.width + 0.5 && b.left >= box.left - 0.5 }; });
+  check('is this you: the card names the place, drawn as a little tree', /Is this you\?/i.test(card) && /Daughter of Aizat & Sarah/.test(card) && !!tree
+    && ['Aizat', 'Sarah', 'Alya', 'Aisha', 'Bella', 'Danish', 'Iman', 'you?'].every(t => tree.texts.includes(t)) && tree.lines >= 8, JSON.stringify(tree));
+  check('is this you: their own name still unknown → a dashed "?" circle with the "you?" ring', tree && tree.dashed === 1 && tree.texts.includes('?'), JSON.stringify(tree));
+  check('is this you: 6 brothers & sisters → 3 drawn + a "+3" circle; the full list is read out to screen readers', tree && tree.texts.includes('+3')
+    && !tree.texts.includes('Cinta') && /Brothers & sisters: Alya, Aisha, Bella, Cinta, Dewi, Emma/.test(tree.label) && /Parents: Aizat, Sarah/.test(tree.label), tree && tree.label);
+  check('is this you: the little tree fits the 375px phone screen', tree && tree.fits);
   check('is this you: no email or password boxes until they say "Yes, that\'s me"', !(await page.isVisible('#au_email')) && !(await page.isVisible('#au_up')));
   await page.tap('#inv_no');
   check('is this you: "not me" → stop here, nothing saved, still no form', /Then please stop here — nothing has been saved/.test(await page.textContent('#inv_who'))

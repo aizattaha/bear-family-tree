@@ -10,6 +10,8 @@
 --   * current partners only (together / dating); siblings share a parent
 --   * live people only; nobody whose name isn't known yet; at most 12 a list
 --   * nothing else: no photos, dates, places or ids
+-- plus `unknown`: whether the invited person's own name isn't known yet, so
+-- the preview draws them as the tree does (a dashed "?")
 -- Only for a live personal invite (general codes and dead codes: as before).
 -- Who may call it is unchanged.
 -- ============================================================
@@ -43,7 +45,8 @@ begin
       from (select grp, jsonb_agg(nm order by k) names from named where k <= 12 group by grp) g;
   end if;
   return jsonb_build_object('name', i.invite_name, 'kind', i.kind, 'expires_at', i.expires_at,
-    'seconds', ceil(extract(epoch from i.expires_at - now()))::int, 'family', fam);
+    'seconds', ceil(extract(epoch from i.expires_at - now()))::int, 'family', fam,
+    'unknown', (select name_unknown from person where id = i.person_id));
 end $$;
 
 -- unchanged: the landing page is signed out; a stale sign-in may still send its token
