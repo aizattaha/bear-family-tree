@@ -153,6 +153,12 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .fld .flabel{display:block;font-size:11px;font-weight:500;color:var(--ink-soft);margin-bottom:1px;}
 .fld input,.fld select,.fld textarea{width:100%;background:transparent;border:0;outline:0;font-size:14px;padding:2px 0;}
 .fld:focus-within{background:#fff;box-shadow:0 0 0 2px var(--primary);}
+/* an iPhone zooms the whole page in when a text box under 16px is tapped, and leaves it
+   zoomed — on phones and tablets every box is at least 16px, so typing never moves the page */
+@media (pointer: coarse){
+  input:not([type=checkbox]):not([type=radio]):not([type=file]),select,textarea{font-size:16px!important;}
+  .bignick input{font-size:20px!important;}
+}
 .fld input:disabled,.fld select:disabled,.fld textarea:disabled{color:var(--ink-soft);}
 .photorow{display:flex;gap:12px;justify-content:space-between;}
 .pslot{flex:1;text-align:center;}
@@ -988,7 +994,8 @@ function centerOn(pid){ const p=layout.pos[pid]; if(!p)return;
 document.getElementById('zoomIn').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.2);};
 document.getElementById('zoomOut').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.2);};
 document.getElementById('homeBtn').onclick=()=>centerOn(viewing());
-if(COARSE)document.getElementById('navhint').textContent='tap a person to open them · drag to move · pinch to zoom';
+if(COARSE){ document.getElementById('navhint').textContent='tap a person to open them · drag to move · pinch to zoom';
+  document.getElementById('search').placeholder='search…'; } // the 16px phone text leaves room for less
 document.getElementById('tutBtn').onclick=()=>openTutorial(false);
 document.getElementById('helpBtn').onclick=()=>openHelp();
 document.getElementById('adminBtn').onclick=()=>openAdmin();
@@ -1588,7 +1595,15 @@ searchEl.addEventListener('input',()=>{ const q=searchEl.value.trim().toLowerCas
   resultsEl.style.display='block'; });
 resultsEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
   const pid=b.dataset.pid; resultsEl.style.display='none'; searchEl.value='';
-  revealPath(pid); centerOn(pid); openPerson(pid); });
+  revealPath(pid); centerOn(pid); openPerson(pid); fitToScreen(); });
+// done searching (result picked, or the box left) → if the page is zoomed in, fit it back
+// to the screen. Browsers have no "zoom out" call, but briefly capping the page at 1×
+// makes it snap back; pinch-zoom works again straight after
+function fitToScreen(){ const vv=window.visualViewport; if(!vv||vv.scale<=1.01)return;
+  const m=document.querySelector('meta[name=viewport]'), was=m.getAttribute('content');
+  m.setAttribute('content',was+', maximum-scale=1');
+  setTimeout(()=>m.setAttribute('content',was),400); }
+searchEl.addEventListener('blur',()=>setTimeout(fitToScreen,350));
 document.addEventListener('click',e=>{ if(!e.target.closest('#searchwrap'))resultsEl.style.display='none'; });
 function revealPath(target){ let vis=computeVisible(); if(vis.has(target))return;
   // BFS path from viewer to target over the full graph
