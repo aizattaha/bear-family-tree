@@ -480,7 +480,8 @@ const pQ = randomUUID();
 r = await B.from('person').insert({ id: pQ, tree_id: treeA, full_name: '?', gender: 'f' }).select('id');
 await B.from('relationship').insert({ tree_id: treeA, kind: 'partner', person_a: pB, person_b: pQ });
 check('a person added as "?" is marked name_unknown by the database', !r.error && unk(pQ) === 't', r.error?.message || unk(pQ));
-for (const [nm, want] of [['??', 't'], ['  Unknown ', 't'], ['UNKNOWN', 't'], ['', 't'], ['Siti Aminah', 'f'], ['?', 't'], ['Ali?', 'f'], ['Unknown Ali', 'f']]) {
+for (const [nm, want] of [['??', 't'], ['  Unknown ', 't'], ['UNKNOWN', 't'], ['', 't'], ['Siti Aminah', 'f'], ['?', 't'], ['Ali?', 'f'], ['Unknown Ali', 'f'],
+  ['-', 't'], [' -- ', 't'], ['\u2014', 't'], ['\u2013', 't'], ['?-', 't'], ['Ali-Hassan', 'f'], ['-Ali', 'f']]) { // Aizat types "-" for the same thing
   r = await B.from('person').update({ full_name: nm }).eq('id', pQ).select('id');
   check(`renamed to "${nm}" → name_unknown ${want === 't'}`, !r.error && r.data.length === 1 && unk(pQ) === want, r.error?.message || `rows=${r.data?.length} mark=${unk(pQ)}`);
 }

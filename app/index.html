@@ -532,8 +532,8 @@ function goesBy(pid){ const per=person(pid);
   return (S.nicknames[pid]||{})[pid]||(per?(isPlaceholder(pid)?placeholderLabel(pid):per.name.split(' ')[0]):'?'); }
 // "?" placeholders: someone added before their name is known — usually a married-in
 // spouse, so the children can hang under the couple. Same rule as the database's
-// name_unknown mark: "?", "??", "unknown" (any case) or empty
-const UNKNOWN_NAME=/^\s*(\?*|unknown)\s*$/i;
+// name_unknown mark: only "?"s and dashes ("?", "??", "-", "—"), "unknown" (any case) or empty
+const UNKNOWN_NAME=/^\s*([-?\u2013\u2014]*|unknown)\s*$/i;
 const isPlaceholder=pid=>!!person(pid)&&UNKNOWN_NAME.test(person(pid).name);
 // shown instead of "?": "Pak Long's wife" — the partner in MY words, so per-viewer
 // nicknames apply — or "Name not known yet" when there's no partner to go by

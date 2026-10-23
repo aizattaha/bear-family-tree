@@ -1,13 +1,14 @@
 -- ============================================================
 -- Placeholder names (2026-10-24, Aizat's "placeholder polish")
 -- Applied with `supabase db push` (tested first on a local stack).
---   A married-in spouse whose name isn't known yet is added as "?", so the
+--   A married-in spouse whose name isn't known yet is added as "?" (or "-"), so the
 --   couple exists and the children hang under them; the real name is typed
 --   in later, without relinking anyone. name_unknown marks those people
 --   behind the scenes. The database sets it on every save from the name
---   itself — "?", "??", "unknown" (any case) or empty → true, a real name →
---   false — so it can never disagree with what was typed, whatever a client
---   sends. Who may read or edit anyone is unchanged.
+--   itself — only "?"s and dashes ("?", "??", "-", "—"), "unknown" (any case)
+--   or empty → true; a real name → false — so it can never disagree with
+--   what was typed, whatever a client sends. Who may read or edit anyone is
+--   unchanged.
 -- ============================================================
 
 alter table person add column if not exists name_unknown boolean not null default false;
@@ -19,7 +20,7 @@ declare marked int; live int;
 begin
   alter table person disable trigger person_stamp;
   update person set name_unknown = true
-    where full_name ~* '^\s*(\?*|unknown)\s*$' and not name_unknown;
+    where full_name ~* '^\s*([-?\u2013\u2014]*|unknown)\s*$' and not name_unknown;
   get diagnostics marked = row_count;
   alter table person enable trigger person_stamp;
   select count(*) into live from person where name_unknown and deleted_at is null;
@@ -30,7 +31,7 @@ end $$;
 create or replace function mark_name_unknown() returns trigger
 language plpgsql set search_path = public, pg_temp as $$
 begin
-  new.name_unknown := coalesce(new.full_name, '') ~* '^\s*(\?*|unknown)\s*$';
+  new.name_unknown := coalesce(new.full_name, '') ~* '^\s*([-?\u2013\u2014]*|unknown)\s*$';
   return new;
 end $$;
 drop trigger if exists person_name_unknown on person;
