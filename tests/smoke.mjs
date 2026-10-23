@@ -178,9 +178,9 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     check(`${L}: search "?" doesn't treat anyone as a person called "?"`, await page.locator('#results button').count() === 0);
     await page.fill('#search', 'Long');
     await tap(page.locator('#results button', { hasText: "Pak Long's wife" }));
-    check(`${L}: her card asks whoever can edit for the name`, await sheetOpen(page)
-      && (await page.textContent('#sheetbody h3')).replace(/\s+/g, ' ').trim() === 'Name not known yet — add their name'
-      && /Pak Long's wife/.test(await page.textContent('#sheetbody .profile')));
+    check(`${L}: her card is titled "Pak Long's wife", with "name not known yet — add their name" under it`, await sheetOpen(page)
+      && (await page.textContent('#sheetbody h3')).replace(/\s+/g, ' ').trim() === "Pak Long's wife"
+      && /name not known yet — add their name/.test((await page.textContent('#sheetbody .profile')).replace(/\s+/g, ' ')));
     await tap(page.locator('#addname'));
     check(`${L}: "add their name" puts the cursor in the name box`, await page.evaluate(() => document.activeElement.id) === 'f_name');
     await closeSheet(page);
@@ -266,9 +266,9 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
       await page.fill('#f_name', '');
       await page.click('#sheetbody button.btn.primary:has-text("Save")');
       const cleared = await page.evaluate(() => ({ name: S.persons.dina.name, ph: isPlaceholder('dina'), label: fullName('dina'), sub: subName('dina') }));
-      check(`${L}: clearing Dina's name asks first, then she's "Name not known yet · child of …"`,
-        asked.some(m => /Clear Dina Zulkifli's name\?/.test(m) && /Name not known yet/.test(m)) && cleared.name === '' && cleared.ph
-        && cleared.label === 'Name not known yet' && /^child of Pak Long/.test(cleared.sub), JSON.stringify({ asked, cleared }));
+      check(`${L}: clearing Dina's name asks first, then she's "Daughter of Pak Long · name not known yet"`,
+        asked.some(m => /Clear Dina Zulkifli's name\?/.test(m) && /Daughter of Pak Long/.test(m)) && cleared.name === '' && cleared.ph
+        && cleared.label === 'Daughter of Pak Long' && cleared.sub === 'name not known yet', JSON.stringify({ asked, cleared }));
     }
     check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
     check(`${L}: the demo never contacted Supabase`, supabase.length === 0, supabase.join(' | '));
@@ -293,9 +293,10 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
   await guard(`invites (${label})`, async () => {
     const L = `invites (${label})`, phone = label === 'phone';
     const { ctx, page, errors } = await demo(L, opts);
-    const calls = [], codes = ['abcdefabcdef', 'fedcbafedcba', 'bbbbccccdddd'];
+    const calls = [], bodies = [], codes = ['abcdefabcdef', 'fedcbafedcba', 'bbbbccccdddd'];
     let made = 0, invite = () => [{ opened_at: null, expires_at: new Date(Date.now() + 3e5).toISOString() }], claimed = null;
     await page.route(/supabase\.co/, r => { const q = r.request(), u = decodeURIComponent(q.url()); calls.push(`${q.method()} ${u.replace(/^.*\/v1\//, '')}`);
+      if (q.postData()) bodies.push(q.postData());
       if (/rpc\/make_qr_invite/.test(u)) return r.fulfill({ json: { code: codes[made++ % 3], expires_at: new Date(Date.now() + 3e5).toISOString(), seconds: 300 } });
       if (/tree_invite/.test(u) && q.method() === 'GET' && /select=opened_at/.test(u)) return r.fulfill({ json: invite() });
       if (/tree_invite/.test(u) && q.method() === 'GET') return r.fulfill({ json: [] });
@@ -367,11 +368,53 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     if (phone) { const h = await page.locator('#fr_wa').boundingBox();
       check('invites (phone): the WhatsApp button is a full-size button', h && h.height >= 44, h && `${Math.round(h.height)}px`); }
     await closeSheet(page);
+    // a "?" with no partner is named by where they hang — in my words on my tree, in shared words in an invite
+    const ph = await page.evaluate(() => { S.persons.phkid = { id: 'phkid', name: '', gender: '', couplePos: '', born: '', country: '', claimedBy: null,
+      notes: '', passed: null, photos: {}, mainPhoto: 'a' }; S.rels.push({ kind: 'pc', a: 'aizat', b: 'phkid' }, { kind: 'pc', a: 'sarah', b: 'phkid' });
+      rebuild(); const n = document.querySelector('.node[data-pid="phkid"]');
+      return { nick: n && n.querySelector('.nick').textContent, full: n && n.querySelector('.full').textContent, two: n && n.querySelector('.nick').classList.contains('two'),
+        invite: inviteName('phkid'), mine: displayName('phkid') }; });
+    check(`${L}: a "?" child shows as "Child of Aizat & Sayang", "name not known yet" under it, on two lines`,
+      ph.nick === 'Child of Aizat & Sayang' && ph.full === 'name not known yet' && ph.two, JSON.stringify(ph));
+    check(`${L}: …but an invite calls them "Child of Aizat & Sarah" — never Aizat's "only us" nickname`, ph.invite === 'Child of Aizat & Sarah', JSON.stringify(ph));
+    const before = calls.length;
+    await page.evaluate(() => invitePerson('phkid')); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
+    const sent = calls.slice(before).find(c => /rpc\/make_qr_invite/.test(c));
+    check(`${L}: the QR code is made with that shared name`, /"invite_nm":"Child of Aizat & Sarah"/.test(bodies.join(' ')) && !!sent, bodies.slice(-2).join(' | '));
+    check(`${L}: the sheet's title uses it too`, /Invite Child of Aizat & Sarah/.test(await page.textContent('#sheetbody h3')), await page.textContent('#sheetbody h3'));
+    await closeSheet(page);
     check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   });
 }
 check('no "mailto:" left anywhere in the app', !/mailto:/i.test(APP_SRC));
+
+// ---------- "Is this you?": a personal invite shows the family before the sign-up form ----------
+await guard('is this you', async () => {
+  const answer = { name: 'Daughter of Aizat & Sarah', kind: 'qr', expires_at: new Date(Date.now() + 18e5).toISOString(), seconds: 1800,
+    family: { parents: ['Aizat', 'Sarah'], siblings: ['Alya', 'Aisha'] } };
+  const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }), page = await ctx.newPage(), errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.route(/supabase\.co/, r => /rpc\/open_invite/.test(r.request().url()) ? r.fulfill({ json: answer }) : r.abort());
+  await page.goto(BASE + '#invite=abcdefabcdef');
+  await page.waitForSelector('#inv_yes', { timeout: 3000 });
+  const card = (await page.textContent('#inv_who')).replace(/\s+/g, ' ');
+  check('is this you: the card names the place and the family (first names)', /Is this you\?/i.test(card) && /Daughter of Aizat & Sarah/.test(card)
+    && /Parents Aizat, Sarah/.test(card) && /Brothers & sisters Alya, Aisha/.test(card), card);
+  check('is this you: no email or password boxes until they say "Yes, that\'s me"', !(await page.isVisible('#au_email')) && !(await page.isVisible('#au_up')));
+  await page.tap('#inv_no');
+  check('is this you: "not me" → stop here, nothing saved, still no form', /Then please stop here — nothing has been saved/.test(await page.textContent('#inv_who'))
+    && !(await page.isVisible('#au_email')));
+  await page.tap('#inv_back'); await page.tap('#inv_yes');
+  check('is this you: "Yes, that\'s me" → "✓ joining as …" and the form, cursor in the email box', /✓ joining as Daughter of Aizat & Sarah/.test(await page.textContent('#inv_who'))
+    && await page.isVisible('#au_up') && await page.evaluate(() => document.activeElement.id) === 'au_email');
+  await page.tap('#au_sw');
+  check('is this you: switching to "sign in" doesn\'t ask again', await page.isVisible('#au_in') && /✓ joining as/.test(await page.textContent('#inv_who')));
+  const small = await page.evaluate(() => [...document.querySelectorAll('#login input')].filter(el => el.offsetParent && parseFloat(getComputedStyle(el).fontSize) < 16).map(el => el.id));
+  check('is this you: text boxes stay ≥ 16px on the phone', small.length === 0, small.join(', '));
+  check('is this you: no errors in the page', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+});
 
 // ---------- the relative's side: a QR code / link opens the app ----------
 await guard('invite landing', async () => {
@@ -388,7 +431,7 @@ await guard('invite landing', async () => {
     await page.waitForFunction(() => !/^you're invited/.test(document.getElementById('inv_banner')?.textContent || ''), null, { timeout: 3000 }).catch(() => {});
     const banner = (await page.textContent('#inv_banner')).trim();
     check(`landing (${what}): tells the database it was opened, once`, opened.length === 1 && /"invite_code":"abcdefabcdef"/.test(opened[0] || ''), opened.join(' | '));
-    check(`landing (${what}): straight to "create your account", with the right words`, await page.locator('#au_up').count() === 1 && want.test(banner), banner);
+    check(`landing (${what}): straight to "create your account", with the right words`, await page.isVisible('#au_up') && want.test(banner), banner);
     check(`landing (${what}): no errors in the page`, errors.length === 0, errors.join(' | '));
     await ctx.close();
   }

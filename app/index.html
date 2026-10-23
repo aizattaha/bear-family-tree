@@ -541,20 +541,27 @@ function goesBy(pid){ const per=person(pid);
 // name_unknown mark: only "?"s and dashes ("?", "??", "-", "—"), "unknown" (any case) or empty
 const UNKNOWN_NAME=/^\s*([-?\u2013\u2014]*|unknown)\s*$/i;
 const isPlaceholder=pid=>!!person(pid)&&UNKNOWN_NAME.test(person(pid).name);
-// shown instead of "?": "Pak Long's wife" — the partner in MY words, so per-viewer
-// nicknames apply — or "Name not known yet" when there's no partner to go by
+// shown instead of "?", as their name: "Pak Long's wife" — the partner in MY words, so
+// per-viewer nicknames apply — or, with no partner to go by, where they hang: "Daughter
+// of Aizat & Sarah", "Parent of Alya". "Name not known yet" only when linked to nobody.
+// The people named are never "?"s themselves, so two placeholders can't name each other.
+// nameOf: how to name them (default: my words; no session yet — "Who are you?" — their own)
 const NO_NAME='Name not known yet';
-function placeholderLabel(pid){
-  const pts=partnersOf(pid).filter(x=>!isPlaceholder(x));
-  const pt=pts.find(x=>isCurrent(relStatus(pid,x)))||pts[0];
-  if(!pt)return NO_NAME;
-  const st=relStatus(pid,pt), g=person(pid).gender;
-  const word=st==='dating'?({f:'girlfriend',m:'boyfriend'}[g]||'partner')
-    :(isCurrent(st)?'':'ex-')+({f:'wife',m:'husband'}[g]||'partner');
-  return (S.session?displayName(pt):goesBy(pt))+"'s "+word; } // no session yet: "Who are you?"
+function placeholderLabel(pid,nameOf){ nameOf=nameOf||(S.session?displayName:goesBy);
+  const known=ids=>ids.filter(x=>!isPlaceholder(x)), g=person(pid).gender;
+  const pts=known(partnersOf(pid)), pt=pts.find(x=>isCurrent(relStatus(pid,x)))||pts[0];
+  if(pt){ const st=relStatus(pid,pt);
+    const word=st==='dating'?({f:'girlfriend',m:'boyfriend'}[g]||'partner')
+      :(isCurrent(st)?'':'ex-')+({f:'wife',m:'husband'}[g]||'partner');
+    return nameOf(pt)+"'s "+word; }
+  const par=known(parentsOf(pid)), kids=known(childrenOf(pid));
+  if(par.length)return ({f:'Daughter',m:'Son'}[g]||'Child')+' of '+par.map(nameOf).join(' & ');
+  if(kids.length)return ({f:'Mother',m:'Father'}[g]||'Parent')+' of '
+    +kids.slice(0,2).map(nameOf).join(', ')+(kids.length>2?'…':'');
+  return NO_NAME; }
 // a person's full name — a placeholder's label, never a bare "?"
 const fullName=pid=>isPlaceholder(pid)?placeholderLabel(pid):person(pid).name;
-// no partner to name them by: where they hang, so two "Name not known yet"s can be told apart
+// linked to nobody but other "?"s: where they hang, so two "Name not known yet"s can be told apart
 function whereOf(pid){ const par=parentsOf(pid), kids=childrenOf(pid);
   return par.length?'child of '+par.map(displayName).join(' & ')
     :kids.length?'parent of '+kids.slice(0,2).map(displayName).join(', ')+(kids.length>2?'…':'')
@@ -918,7 +925,7 @@ function rebuild(origin){
   for(const pid of vis){ const p=pos[pid]; if(!p)continue; seen.add(pid);
     const per=person(pid); const isYou=pid===viewing();
     const passed=!!per.passed, unknown=isPlaceholder(pid);
-    const nick=displayName(pid), two=unknown&&nick===NO_NAME; // too long for one line on a node
+    const nick=displayName(pid), two=unknown&&nick.length>15; // "Daughter of Aizat & Sarah": too long for one line
     let inner=`<button class="addfab" data-add="${pid}" title="add relative">＋</button>
       <div class="avatar${unknown?' unknown':''}">${faceHtml(per)}
         ${(!passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>
@@ -1231,16 +1238,17 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     ?`only you can see this for now — and ${esc(theirs)}, once they join the tree`
     :per.claimedBy===S.session.nucleusId?`only you and ${esc(theirs)} can see this`
     :`only you and ${esc(theirs)}'s household can see this`;
-  // a placeholder: whoever can edit is asked for the name; everyone else sees the label
+  // a placeholder: the label is their name ("Daughter of Aizat & Sarah"), "name not known
+  // yet" goes underneath, and whoever can edit is asked for the real one
   const unknown=isPlaceholder(pid), label=unknown?placeholderLabel(pid):'';
-  const facts=[editable&&unknown&&label!==NO_NAME?label:null,
-    relationLabel(pid), per.born?('b. '+per.born):null,
+  const addName=editable?` — <button class="link" id="addname" onclick="focusName()" style="font-size:inherit;line-height:inherit;">add their name</button>`:'';
+  const facts=[relationLabel(pid), per.born?('b. '+per.born):null,
     per.passed?null:(per.country?('lives in '+ (COUNTRIES.find(c=>c[0]===per.country)?.[1]||per.country)+' '+flagEmoji(per.country)):null)]
     .filter(Boolean).join(' · ');
   openSheet(`
     <div class="profile">${avatarHtml(per)}
-      <div><h3>${!unknown?esc(per.name):!editable?`<span class="unknownname">${esc(label)}</span>`
-        :`<span class="unknownname">Name not known yet</span> — <button class="link" id="addname" onclick="focusName()" style="font-size:inherit;line-height:inherit;">add their name</button>`}</h3>
+      <div><h3>${!unknown?esc(per.name):`<span class="unknownname">${esc(label)}</span>${label===NO_NAME?addName:''}`}</h3>
+        ${unknown&&label!==NO_NAME?`<div class="cap2"><span class="unknownname">name not known yet</span>${addName}</div>`:''}
         <div class="cap2">${esc(facts)}</div>
         ${per.passed?`<div class="cap2">${esc(memorialLine(per))}</div>`:''}
         <div class="cap2" style="color:var(--primary);">${claimedLabel}</div></div></div>
@@ -1662,8 +1670,10 @@ const timeOf=d=>d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
 async function copyText(text,done){ try{ await navigator.clipboard.writeText(text); toast(done); }
   catch(e){ prompt('copy it from here:',text); } }
 // the name an invite greets them by: what YOU call them ("Kak Yana") — unless that's an
-// "only us" nickname, which stays in your household
-const inviteName=pid=>isPrivNick(viewing(),pid)?goesBy(pid):displayName(pid);
+// "only us" nickname, which stays in your household. A "?" gets their label in those same
+// words: "Daughter of Aizat & Sarah", never "… & Dear" from a private nickname
+const sharedName=pid=>isPrivNick(viewing(),pid)?goesBy(pid):displayName(pid);
+const inviteName=pid=>isPlaceholder(pid)?placeholderLabel(pid,sharedName):sharedName(pid);
 // a general code (⭐ Super settings): anyone with it can join, then claims or adds themselves
 function inviteDialog(code,until){
   const link=inviteLink(code), day=dayOf(until);
@@ -1955,14 +1965,32 @@ function openInvite(){ if(!PENDING_INVITE||!sb)return Promise.resolve(undefined)
     .catch(()=>{ INVITE_INFO=null; return undefined; }); }
 function inviteNote(inv,welcome){
   if(!inv)return "this invite has run out or has already been used — ask the family for a fresh one (a new QR code, or a new link) 🐻";
-  return [welcome?(inv.name?esc(inv.name)+", you're":"you're")+' invited to join Bear Family Tree! 🐻':'',
+  return [welcome?(inv.name?esc(inv.name)+", you're":"you're")+' invited to join Bear Family Tree! 🐻'
+      :inv.family&&inv.name?`taking the place of <b>${esc(inv.name)}</b>`:'',
     inv.kind==='qr'?`<span style="font-weight:400;">please finish by ${esc(timeOf(new Date(inv.expires_at)))} — you have 30 minutes</span>`:'']
     .filter(Boolean).join('<br>'); }
+// "Is this you?" — a personal invite shows the close family they're joining, by the first
+// names those people go by (the database chooses them: no photos, dates or nicknames)
+let INVITE_SURE=false; // they said "Yes, that's me"
+function familyHtml(inv){ const f=inv.family||{};
+  const row=(k,one,many)=>{ const a=f[k]||[]; if(!a.length)return '';
+    return `<div class="nickrow"><span class="cap2">${a.length>1?many:one}</span>
+      <span style="font-size:14px;font-weight:500;text-align:right;">${esc(a.slice(0,6).join(', '))}${a.length>6?` and ${a.length-6} more`:''}</span></div>`; };
+  const rows=row('parents','Parent','Parents')+row('partners','Partner','Partners')
+    +row('children','Child','Children')+row('siblings','Brother or sister','Brothers & sisters');
+  // a flat box inside the sign-in card (#login .card would give it the big card's shadow)
+  return `<div class="card" style="text-align:left;margin:2px 0 12px;background:var(--field);box-shadow:none;border-radius:16px;padding:14px 16px;"><div class="label">Is this you?</div>
+    <div style="font-size:16px;line-height:22px;font-weight:600;margin-bottom:4px;">${esc(inv.name||'your place on the tree')}</div>
+    ${rows||'<div class="cap2">nobody linked to them on the tree yet</div>'}
+    <div class="cap2" style="margin-top:6px;">whoever signs up with this invite takes this place on the family tree</div></div>`; }
 function renderLogin(signup,prefillEmail,note){
   if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
+  const gate=!!(PENDING_INVITE&&sb&&!INVITE_SURE); // a personal invite: "Is this you?" first
   loginCard(`<h1>Bear Family Tree</h1>
     ${PENDING_INVITE?`<div id="inv_banner" style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to join Bear Family Tree! 🐻</div>`
      :PENDING_NEWTREE?`<div style="background:var(--accent-soft);color:var(--primary);border-radius:12px;padding:10px 14px;font-size:13px;font-weight:500;line-height:19px;margin:6px 0 12px;">you're invited to create your own family tree! 🐻</div>`:''}
+    <div id="inv_who">${gate?'<div class="cap">checking your invite…</div>':''}</div>
+    <div id="au_box"${gate?' style="display:none;"':''}>
     <div class="cap">${signup?'create your account — it takes ten seconds':'sign in — one login per household, shared or personal'}</div>
     <form id="au_form" name="${signup?'register':'login'}" method="post" action="#" autocomplete="on">
       <div class="fld" style="text-align:left;"><span class="flabel">Email</span><input id="au_email" name="email" type="email" autocomplete="username" inputmode="email" autocapitalize="off" autocorrect="off" spellcheck="false" value="${esc(prefillEmail||'')}"></div>
@@ -1973,7 +2001,7 @@ function renderLogin(signup,prefillEmail,note){
       <button type="submit" class="btn primary" style="width:100%;" id="${signup?'au_up':'au_in'}">${signup?'Create account':'Sign in'}</button>
     </form>
     ${signup?'':'<button class="link" id="au_forgot" style="margin-top:12px;display:block;margin-left:auto;margin-right:auto;line-height:19px;">Forgot your password?<br><span style="font-weight:400;">Ask a family keeper for a reset code</span></button>'}
-    <button class="link" id="au_sw" style="margin-top:12px;">${signup?'already have an account? sign in':'new here? create an account'}</button>
+    <button class="link" id="au_sw" style="margin-top:12px;">${signup?'already have an account? sign in':'new here? create an account'}</button></div>
     ${sb?'':'<div class="cap" style="color:var(--bad,#D25353);margin-top:8px;">cloud unavailable — check your internet</div>'}
     <button class="link" id="au_demo" style="margin-top:14px;">try the local demo instead</button>`);
   const msg=t=>{document.getElementById('au_msg').textContent=t;};
@@ -2002,8 +2030,21 @@ function renderLogin(signup,prefillEmail,note){
   // credentials on sign-in, and suggests strong passwords only on sign-up
   document.getElementById('au_form').onsubmit=e=>{ e.preventDefault(); (signup?doUp:doIn)(); };
   // personalise: "Kak Yana, you're invited to join Bear Family Tree!" — or say it has run out
-  openInvite().then(inv=>{ const b=document.getElementById('inv_banner'); if(!b||inv===undefined)return;
-    b.innerHTML=inviteNote(inv,true); });
+  openInvite().then(inv=>{ const b=document.getElementById('inv_banner'), who=document.getElementById('inv_who'); if(!b)return;
+    const show=()=>{ document.getElementById('au_box').style.display=''; };
+    if(inv!==undefined)b.innerHTML=inviteNote(inv,true);
+    const sure=()=>`<div class="cap" style="color:var(--primary);">✓ joining as <b>${esc(inv.name||'yourself')}</b></div>`;
+    // a general code, a dead one, or no answer: straight to the form, as before
+    if(!gate||!inv||!inv.family){ who.innerHTML=INVITE_SURE&&inv&&inv.family?sure():''; show(); return; }
+    const ask=()=>{ who.innerHTML=familyHtml(inv)+`<button class="btn primary" style="width:100%;" id="inv_yes">Yes, that's me</button>
+      <button class="link" id="inv_no" style="margin-top:12px;">not me</button>`;
+      document.getElementById('inv_yes').onclick=()=>{ INVITE_SURE=true; who.innerHTML=sure();
+        show(); document.getElementById('au_email').focus(); };
+      document.getElementById('inv_no').onclick=()=>{ who.innerHTML=familyHtml(inv)
+        +`<div class="cap" style="color:var(--ink);">Then please stop here — nothing has been saved. Tell whoever gave you this code, so they can make one for the right person.</div>
+        <button class="link" id="inv_back">it is me after all</button>`;
+        document.getElementById('inv_back').onclick=ask; }; };
+    ask(); });
   document.getElementById('au_sw').onclick=()=>renderLogin(!signup,creds().email);
   const fg=document.getElementById('au_forgot'); if(fg)fg.onclick=()=>renderForgot(creds().email);
   document.getElementById('au_demo').onclick=()=>{ MODE='demo'; DEMO_CHOSEN=true; load();

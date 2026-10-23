@@ -6,6 +6,7 @@
 //   4. keeper reset codes (2026-10-24): who may make one, redeeming, real sign-in after, limits
 //   5. placeholder names (2026-10-24): "?" people marked name_unknown, edit rules unchanged
 //   6. QR invites (2026-10-24): 5 minutes to scan, then 30 to sign up; refresh; single use
+//      + "Is this you?": a personal invite's family, first names only
 //   7. catalog: search_path + who may call which function, Finance leftovers gone
 // env: SUPABASE_URL, SUPABASE_KEY (publishable), DB_CONTAINER (the stack's db container)
 // usage: node permissions.mjs        (exit code 1 if anything fails)
@@ -626,6 +627,60 @@ section = '[qr] ';
   const left = sql(`select count(*) from tree_invite where tree_id='${tree}' and kind='qr' and expires_at > now()`).trim();
   r = await Q.from('tree_invite').delete().eq('code', c1c).select('code');
   check('a keeper can delete a QR code (cancel it)', !r.error && r.data.length === 1 && left === '1', r.error?.message || left);
+}
+
+/* ============ 6b. "Is this you?" (2026-10-24): a personal invite shows its family, first names only ============ */
+section = '[preview] ';
+{
+  const K2 = await user('pk'), J4 = await user('pj');
+  r = await K2.rpc('create_tree', { nucleus_label: 'P house', tree_nm: 'P tree' });
+  const tree = r.data, nucK = await nucOf(K2), id = () => randomUUID();
+  const dad = id(), mum = id(), me = id(), sis = id(), oldSis = id(), half = id(), ph = id(), gone = id(), pt = id(), ex = id(), kid = id();
+  r = await K2.from('person').insert([
+    { id: dad, tree_id: tree, full_name: 'Adam Test', born: '1950', claimed_by: nucK },
+    { id: mum, tree_id: tree, full_name: 'Hawa Test', born: '1952' },
+    { id: me, tree_id: tree, full_name: '', gender: 'f' },                      // the "?" being invited
+    { id: sis, tree_id: tree, full_name: 'Sara Test', born: '1980' },
+    { id: oldSis, tree_id: tree, full_name: 'Aina Test', born: '1975' },
+    { id: half, tree_id: tree, full_name: 'Hadi Test', born: '1990' },          // Adam's only
+    { id: ph, tree_id: tree, full_name: '?' },                                  // a sister not named yet
+    { id: gone, tree_id: tree, full_name: 'Gone Test' },
+    { id: pt, tree_id: tree, full_name: 'Paul Partner' }, { id: ex, tree_id: tree, full_name: 'Eddie Ex' },
+    { id: kid, tree_id: tree, full_name: 'Kim Kid Test' }]);
+  check('setup: a family of 11', !r.error, r.error?.message);
+  const pc = (a, b) => ({ tree_id: tree, kind: 'parent-child', person_a: a, person_b: b });
+  r = await K2.from('relationship').insert([pc(dad, me), pc(mum, me), pc(dad, sis), pc(mum, sis), pc(dad, oldSis), pc(mum, oldSis),
+    pc(dad, half), pc(dad, ph), pc(mum, gone), pc(me, kid),
+    { tree_id: tree, kind: 'partner', person_a: me, person_b: pt, status: 'together' },
+    { tree_id: tree, kind: 'partner', person_a: ex, person_b: me, status: 'divorced' },
+    { tree_id: tree, kind: 'partner', person_a: dad, person_b: mum, status: 'together' }]);
+  check('setup: links', !r.error, r.error?.message);
+  r = await K2.rpc('remove_person', { p: gone });
+  check('setup: one sister removed from the tree', !r.error, r.error?.message);
+  // Adam goes by "Abah" (shown); Hawa's own nickname is "only us" (never shown); Adam's nickname for Sara is his, not hers
+  sql(`insert into nickname (tree_id, person_id, viewer_person_id, text, private) values
+    ('${tree}', '${dad}', '${dad}', 'Abah', false), ('${tree}', '${mum}', '${mum}', 'SecretMum', true), ('${tree}', '${sis}', '${dad}', 'Kakak', false)`);
+  const qr = await K2.rpc('make_qr_invite', { p: me, invite_nm: 'Daughter of Abah & Hawa' });
+  r = await anon.rpc('open_invite', { invite_code: qr.data?.code });
+  const f = r.data?.family || {};
+  check('a personal invite answers with the family it joins (signed out)', !r.error && r.data?.name === 'Daughter of Abah & Hawa' && !!r.data.family, r.error?.message || JSON.stringify(r.data));
+  check('parents: the name each goes by themselves, else the first name — never a private one', JSON.stringify(f.parents) === '["Abah","Hawa"]', JSON.stringify(f.parents));
+  check('brothers & sisters: anyone sharing a parent, oldest first — no "?"s, no removed people, nobody else\'s nickname for them',
+    JSON.stringify(f.siblings) === '["Aina","Sara","Hadi"]', JSON.stringify(f.siblings));
+  check('partner: the current one only, not an ex', JSON.stringify(f.partners) === '["Paul"]', JSON.stringify(f.partners));
+  check('children', JSON.stringify(f.children) === '["Kim"]', JSON.stringify(f.children));
+  check('first names only: no surnames, years, ids or other fields', !/Test|Partner|Ex|19\d\d|[0-9a-f]{8}-/.test(JSON.stringify(f))
+    && Object.keys(f).every(k => ['parents', 'partners', 'children', 'siblings'].includes(k)), JSON.stringify(f));
+  const ln = await K2.from('tree_invite').insert({ tree_id: tree, person_id: pt, invite_name: 'Paul' }).select('code').single();
+  r = await anon.rpc('open_invite', { invite_code: ln.data?.code });
+  check('a 14-day link shows family too — Paul\'s only link is a "?", so nobody is listed', !r.error && JSON.stringify(r.data?.family) === '{}', JSON.stringify(r.data));
+  const gen = await K2.from('tree_invite').insert({ tree_id: tree }).select('code').single();
+  r = await anon.rpc('open_invite', { invite_code: gen.data?.code });
+  check('a general code shows no family (it isn\'t for one person)', !r.error && r.data && r.data.family === null, JSON.stringify(r.data));
+  r = await J4.rpc('join_with_invite', { invite_code: qr.data?.code, nucleus_label: 'J4 house', tree_nm: 'J4 tree' });
+  check('…and taking the place still works', !r.error && r.data?.person_id === me, r.error?.message);
+  r = await anon.rpc('open_invite', { invite_code: qr.data?.code });
+  check('once used, the code shows nothing at all', !r.error && r.data === null, JSON.stringify(r.data));
 }
 
 /* ============ 7. catalog: search_path + who may call what ============ */
