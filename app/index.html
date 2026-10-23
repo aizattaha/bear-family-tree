@@ -1420,9 +1420,11 @@ function bornOk(b){ if(!b||BORN_RE.test(b))return true;
 window.savePerson=async(pid)=>{ const per=person(pid);
   const editable=canEditPerson(pid), memEditable=canEditMemorial(pid);
   const val=id=>document.getElementById(id).value;
-  // a placeholder's name box starts empty: leaving it empty keeps them as "?"
-  const name=val('f_name').trim()||(isPlaceholder(pid)?per.name:'');
-  if(editable){ if(!name){toast('name is needed');return;}
+  // an empty name box means "name not known yet": a placeholder stays as it is,
+  // and clearing a real name asks first, so a name is never wiped by accident
+  let name=val('f_name').trim();
+  if(editable){ if(!name&&isPlaceholder(pid))name=per.name;
+    else if(!name&&!confirm(`Clear ${per.name}'s name?\n\nThey'll show as "${placeholderLabel(pid)}" until someone types their name in.`))return;
     if(!bornOk(val('f_born').trim()))return; }
   const d=memEditable?val('f_passed').trim().toLowerCase():'';
   if(d&&d!=='unknown'&&!BORN_RE.test(d)){toast('date should be YYYY or YYYY-MM-DD');return;}
@@ -1451,7 +1453,7 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
   const canSibling=parentsOf(anchor).length>0;
   openSheet(`
     <h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Add a person</h3>
-    <div class="fld"><span class="flabel">Full name</span><input id="a_name" placeholder="full name"></div>
+    <div class="fld"><span class="flabel">Full name</span><input id="a_name" placeholder="leave empty if not known yet"></div>
     <div style="display:flex;gap:10px;">
       <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="a_born" placeholder="year"></div>
       <div class="fld" style="flex:1;"><span class="flabel">Gender</span>
@@ -1477,8 +1479,7 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
       b.style.outline='2px solid var(--primary)'; b.setAttribute('aria-pressed','true');
       document.getElementById('a_save').style.opacity=''; }; });
   document.getElementById('a_save').onclick=()=>{
-    const name=document.getElementById('a_name').value.trim();
-    if(!name){toast('name is needed');return;}
+    const name=document.getElementById('a_name').value.trim(); // empty = name not known yet
     if(!rel){toast("choose how they're connected — parent, partner, child or sibling");return;}
     if(!bornOk(document.getElementById('a_born').value.trim()))return;
     const id=(MODE==='cloud'&&crypto.randomUUID)?crypto.randomUUID():'p'+Date.now().toString(36);
