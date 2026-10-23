@@ -6,8 +6,8 @@ folder and paste the sentence in quotes.
 ## What runs by itself on the Mac
 | Job | When | Where it writes |
 |---|---|---|
-| **Daily keep-awake check** (`com.bearfamilytree.keepawake`) | every day at 9:00, on wake if the Mac was asleep, and at login | one line per run in `~/Library/Logs/BearFamilyTree-keepawake.log`; a pop-up if the database doesn't answer, **or if the newest weekly backup is more than 8 days old** |
-| **Weekly backup** (`com.bearfamilytree.backup`) | Sundays 10:00 (or on next wake) | Google Drive → Aizat → Backups → bear-family-tree → `YYYY-MM-DD_weekly` (the newest 8 are kept); its log notes the database's size, with a pop-up **if it passes 300 MB** (the free plan stops at 500 MB) |
+| **Daily keep-awake check** (`com.bearfamilytree.keepawake`) | every day at 9:00, on wake if the Mac was asleep, and at login | one line per run in `~/Library/Logs/BearFamilyTree-keepawake.log`, with the newest weekly backup's age and the database's size; a pop-up if the database doesn't answer, **if the newest weekly backup is more than 8 days old**, or **if the database passes 300 MB** (the free plan stops at 500 MB) |
+| **Weekly backup** (`com.bearfamilytree.backup`) | Sundays 10:00 (or on next wake) | Google Drive → Aizat → Backups → bear-family-tree → `YYYY-MM-DD_weekly` (the newest 8 are kept) |
 
 Both only work while the Mac is switched on. A Mac switched off for more than 7 days lets the
 free database go to sleep (see 1).
@@ -23,9 +23,10 @@ and press Enter:
 ```bash
 tail -5 ~/Library/Logs/BearFamilyTree-keepawake.log
 ```
-Good lines look like `2026-10-24 09:00  OK    HTTP 200 in 0.2s · backup 1 day old`. `SKIP` means
-the Mac had no internet at that moment (it tries again next time). `DOWN` means see 1.
+Good lines look like `2026-10-24 09:00  OK    HTTP 200 in 0.2s · backup 1 day old · database 20 MB`.
+`SKIP` means the Mac had no internet at that moment (it tries again next time). `DOWN` means see 1.
 `OLD BACKUP` means the newest weekly backup is more than 8 days old — see "Going away" above.
+`BIG` means the database passed 300 MB — **ask Claude** "Why is the Bear Family Tree database big?".
 
 ---
 
