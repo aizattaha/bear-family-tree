@@ -159,6 +159,12 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .btn.primary{background:var(--primary);color:#fff;}
 .btn.primary:hover{background:var(--primary-hover);}
 .btn.secondary{background:var(--accent-soft);color:var(--primary);}
+a.btn{text-decoration:none;}
+/* an invite's QR code: big, black on white; greyed out once it has run out or been scanned */
+.qrbox{width:min(260px,68vw);margin:8px auto 10px;background:#fff;border-radius:16px;padding:6px;}
+.qrbox svg{display:block;width:100%;height:auto;transition:opacity .3s,filter .3s;}
+.qrbox.dead svg{opacity:.12;filter:grayscale(1) blur(1px);}
+.qrbox .wait{aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink-soft);}
 .fld{background:var(--field);border-radius:14px;padding:9px 14px;margin-bottom:10px;}
 .fld .flabel{display:block;font-size:11px;font-weight:500;color:var(--ink-soft);margin-bottom:1px;}
 .fld input,.fld select,.fld textarea{width:100%;background:transparent;border:0;outline:0;font-size:14px;padding:2px 0;}
@@ -477,7 +483,7 @@ const db={
   renameNucleus(name){ return attempt(()=>wrote(sb.from('nucleus').update({tree_name:name})
       .eq('id',ME.nucleusId))); },
   async invite(){ const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId})
-    .select('code').single(); if(error){dbErr(error);return null;} return data.code; } };
+    .select('code,expires_at').single(); if(error){dbErr(error);return null;} return data; } };
 let refetchT=null;
 function scheduleRefetch(){ if(MODE!=='cloud')return; stampSeen(); clearTimeout(refetchT);
   refetchT=setTimeout(async()=>{
@@ -1062,8 +1068,9 @@ const scrim=document.getElementById('scrim'), sheet=document.getElementById('she
       sheetbody=document.getElementById('sheetbody');
 let sheetPid=null; // whose card is open, so a refused save can redraw it
 let sheetOpenedAt=0;
+let QR=null; // an invite's QR code on screen (see invites) — it goes when its sheet does
 function refreshSheet(pid){ if(sheetPid===pid&&sheet.classList.contains('open')&&person(pid))openPerson(pid); }
-function openSheet(html,pid){ const same=sheet.classList.contains('open')&&sheetPid&&sheetPid===(pid||null);
+function openSheet(html,pid){ qrStop(); const same=sheet.classList.contains('open')&&sheetPid&&sheetPid===(pid||null);
   const keep=same?sheet.scrollTop:0;
   sheetbody.innerHTML=html; sheetPid=pid||null;
   // a new card starts at the top; redrawing the same card (after a save) keeps your place
@@ -1073,7 +1080,7 @@ function openSheet(html,pid){ const same=sheet.classList.contains('open')&&sheet
     .forEach(i=>i.setAttribute('autocomplete','off'));
   scrim.style.display='block';
   requestAnimationFrame(()=>sheet.classList.add('open')); }
-function closeSheet(){ sheet.classList.remove('open'); scrim.style.display='none'; }
+function closeSheet(){ qrStop(); sheet.classList.remove('open'); scrim.style.display='none'; }
 // the second tap of a habitual double-tap lands on the scrim — don't let it close the card it just opened
 function scrimClose(){ if(Date.now()-sheetOpenedAt>450)closeSheet(); }
 scrim.onclick=scrimClose;
@@ -1566,48 +1573,212 @@ window.renameTree=async()=>{ const nuc=S.nuclei[S.session.nucleusId];
   if(v&&v.trim()){ const was=nuc.treeName; nuc.treeName=v.trim();
     show(); toast('renamed — '+nuc.treeName);
     if(!await db.renameNucleus(nuc.treeName)){ nuc.treeName=was; show(); } } };
-function inviteDialog(code,forName){
-  const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
-  const mail='mailto:?subject='+encodeURIComponent('Join our family tree 🐻')
-    +'&body='+encodeURIComponent((forName?`${forName}, you're invited to join Bear Family Tree! 🐻\n\n`:'')
-    +`Open this link, create an account, and you'll land in your place on the family tree:\n\n${link}\n\nInvite code (if asked): ${code}`);
-  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Invite${forName?' — '+esc(forName):''}</h3>
-    <div class="card"><div class="label">Share this link</div>
-      <div style="font-size:12px;line-height:17px;word-break:break-all;color:var(--ink-soft);">${esc(link)}</div></div>
-    <div class="card"><div class="label">Or the code</div>
-      <div class="bignick"><span class="v" style="font-size:20px;">${esc(code)}</span></div></div>
+/* ================= QR codes ================= */
+// a small QR encoder in the page itself, so no outside service ever sees an
+// invite code: byte mode, error correction level M, versions 1–10 (up to
+// 213 bytes — an invite link is about 60). The steps follow the QR standard
+// (ISO/IEC 18004) as laid out in Project Nayuki's MIT-licensed generator.
+const QR_ECC=[0,10,16,26,18,24,16,18,22,22,26], QR_BLOCKS=[0,1,1,1,2,2,4,4,4,5,5];
+const QR_MASKS=[(x,y)=>(x+y)%2===0,(x,y)=>y%2===0,(x,y)=>x%3===0,(x,y)=>(x+y)%3===0,
+  (x,y)=>(Math.floor(x/3)+Math.floor(y/2))%2===0,(x,y)=>x*y%2+x*y%3===0,
+  (x,y)=>(x*y%2+x*y%3)%2===0,(x,y)=>((x+y)%2+x*y%3)%2===0];
+// → rows of true (dark) / false (light); mask 0–7 forces one (tests), else the best is picked
+function qrMatrix(text,forceMask){
+  const bytes=[...new TextEncoder().encode(text)];
+  const rawMods=v=>{ let r=(16*v+128)*v+64; if(v>=2){ const n=Math.floor(v/7)+2; r-=(25*n-10)*n-55; if(v>=7)r-=36; } return r; };
+  const dataCw=v=>Math.floor(rawMods(v)/8)-QR_ECC[v]*QR_BLOCKS[v];
+  let ver=1; while(ver<=10&&12+(ver<10?0:8)+8*bytes.length>8*dataCw(ver))ver++;
+  if(ver>10)throw new Error('too long for a QR code');
+  // the bits: byte mode, length, the bytes, a terminator, then filler bytes
+  const bits=[], put=(v,n)=>{ for(let i=n-1;i>=0;i--)bits.push(v>>>i&1); }, cap=8*dataCw(ver);
+  put(4,4); put(bytes.length,ver<10?8:16); bytes.forEach(b=>put(b,8));
+  put(0,Math.min(4,cap-bits.length)); put(0,(8-bits.length%8)%8);
+  for(let f=0xEC;bits.length<cap;f^=0xEC^0x11)put(f,8);
+  const cw=[]; for(let i=0;i<bits.length;i+=8)cw.push(bits.slice(i,i+8).reduce((a,b)=>a<<1|b,0));
+  // Reed–Solomon error correction for each block, then the blocks interleaved
+  const mul=(x,y)=>{ let z=0; for(let i=7;i>=0;i--){ z=(z<<1)^((z>>>7)*0x11D); z^=(y>>>i&1)*x; } return z; };
+  const ecLen=QR_ECC[ver], nb=QR_BLOCKS[ver], raw=Math.floor(rawMods(ver)/8);
+  const div=Array(ecLen).fill(0); div[ecLen-1]=1;
+  for(let i=0,root=1;i<ecLen;i++,root=mul(root,2))
+    for(let j=0;j<ecLen;j++){ div[j]=mul(div[j],root); if(j+1<ecLen)div[j]^=div[j+1]; }
+  const nShort=nb-raw%nb, shortLen=Math.floor(raw/nb), blocks=[];
+  for(let i=0,k=0;i<nb;i++){ const d=cw.slice(k,k+shortLen-ecLen+(i<nShort?0:1)), ec=Array(ecLen).fill(0); k+=d.length;
+    d.forEach(b=>{ const f=b^ec.shift(); ec.push(0); div.forEach((c,j)=>{ ec[j]^=mul(c,f); }); });
+    if(i<nShort)d.push(0); blocks.push(d.concat(ec)); }
+  const all=[]; for(let i=0;i<blocks[0].length;i++)blocks.forEach((b,j)=>{ if(i!==shortLen-ecLen||j>=nShort)all.push(b[i]); });
+  // the fixed parts: timing lines, the three corner squares, alignment squares, format + version
+  const size=ver*4+17, mod=[...Array(size)].map(()=>Array(size).fill(false)), fixed=mod.map(r=>r.slice());
+  const set=(x,y,dark)=>{ mod[y][x]=dark; fixed[y][x]=true; };
+  for(let i=0;i<size;i++){ set(6,i,i%2===0); set(i,6,i%2===0); }
+  [[3,3],[size-4,3],[3,size-4]].forEach(([cx,cy])=>{ for(let dy=-4;dy<=4;dy++)for(let dx=-4;dx<=4;dx++){
+    const x=cx+dx, y=cy+dy, d=Math.max(Math.abs(dx),Math.abs(dy)); if(x>=0&&x<size&&y>=0&&y<size)set(x,y,d!==2&&d!==4); } });
+  if(ver>1){ const n=Math.floor(ver/7)+2, step=Math.ceil((ver*4+4)/(n*2-2))*2, pos=[6];
+    for(let p=size-7;pos.length<n;p-=step)pos.splice(1,0,p);
+    pos.forEach((y,i)=>pos.forEach((x,j)=>{ if(i===0&&j===0||i===0&&j===n-1||i===n-1&&j===0)return;
+      for(let dy=-2;dy<=2;dy++)for(let dx=-2;dx<=2;dx++)set(x+dx,y+dy,Math.max(Math.abs(dx),Math.abs(dy))!==1); })); }
+  const format=mask=>{ let r=mask; for(let i=0;i<10;i++)r=(r<<1)^((r>>>9)*0x537); // level M = 00
+    const b=(mask<<10|r)^0x5412, bit=i=>(b>>>i&1)===1;
+    for(let i=0;i<=5;i++)set(8,i,bit(i)); set(8,7,bit(6)); set(8,8,bit(7)); set(7,8,bit(8));
+    for(let i=9;i<15;i++)set(14-i,8,bit(i));
+    for(let i=0;i<8;i++)set(size-1-i,8,bit(i));
+    for(let i=8;i<15;i++)set(8,size-15+i,bit(i));
+    set(8,size-8,true); };
+  format(0);
+  if(ver>=7){ let r=ver; for(let i=0;i<12;i++)r=(r<<1)^((r>>>11)*0x1F25);
+    const b=ver<<12|r; for(let i=0;i<18;i++){ const dark=(b>>>i&1)===1, a=size-11+i%3, c=Math.floor(i/3); set(a,c,dark); set(c,a,dark); } }
+  // the data, two columns at a time, zig-zagging up and down from the right
+  for(let right=size-1,i=0;right>=1;right-=2){ if(right===6)right=5;
+    for(let v=0;v<size;v++)for(let j=0;j<2;j++){ const x=right-j, y=(right+1&2)===0?size-1-v:v;
+      if(!fixed[y][x]&&i<all.length*8){ mod[y][x]=(all[i>>>3]>>>7-(i&7)&1)===1; i++; } } }
+  // a mask breaks up patterns a camera could misread: try all 8, keep the one with the lowest penalty
+  const applyMask=m=>{ for(let y=0;y<size;y++)for(let x=0;x<size;x++)if(!fixed[y][x]&&QR_MASKS[m](x,y))mod[y][x]=!mod[y][x]; };
+  const penalty=()=>{ let p=0, dark=0;
+    const lines=mod.concat(mod.map((_,x)=>mod.map(r=>r[x])));
+    lines.forEach(line=>{ let run=1;
+      for(let i=1;i<=size;i++){ if(i<size&&line[i]===line[i-1])run++; else { if(run>=5)p+=run-2; run=1; } }
+      const s='0000'+line.map(d=>d?1:0).join('')+'0000';
+      for(const f of ['10111010000','00001011101'])for(let i=s.indexOf(f);i>=0;i=s.indexOf(f,i+1))p+=40; });
+    for(let y=0;y<size;y++)for(let x=0;x<size;x++){ if(mod[y][x])dark++;
+      if(x<size-1&&y<size-1&&mod[y][x]===mod[y][x+1]&&mod[y][x]===mod[y+1][x]&&mod[y][x]===mod[y+1][x+1])p+=3; }
+    return p+(Math.ceil(Math.abs(dark*20-size*size*10)/(size*size))-1)*10; };
+  let best=forceMask;
+  if(best===undefined){ let low=Infinity;
+    for(let m=0;m<8;m++){ applyMask(m); format(m); const p=penalty(); if(p<low){ low=p; best=m; } applyMask(m); } }
+  applyMask(best); format(best);
+  return mod; }
+// black on white with the 4-module quiet border scanners need; one path, crisp at any size
+function qrSvg(text){ const m=qrMatrix(text), n=m.length+8; let d='';
+  m.forEach((row,y)=>{ for(let x=0;x<row.length;x++)if(row[x]){ let w=1; while(row[x+w])w++;
+    d+=`M${x+4} ${y+4}h${w}v1h-${w}z`; x+=w-1; } });
+  return `<svg viewBox="0 0 ${n} ${n}" shape-rendering="crispEdges" role="img" aria-label="QR code"><rect width="${n}" height="${n}" fill="#fff"/><path d="${d}" fill="#000"/></svg>`; }
+/* ================= invites ================= */
+// a WhatsApp link only pre-fills the message — the keeper picks the person or the
+// family chat themselves, so no phone number lives in this (public) code
+const inviteLink=code=>(APP_URL||location.href.split('#')[0])+'#invite='+code;
+const waHref=text=>'https://wa.me/?text='+encodeURIComponent(text);
+const dayOf=d=>d.toLocaleDateString([],{weekday:'short',day:'numeric',month:'short'});
+const timeOf=d=>d.toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+async function copyText(text,done){ try{ await navigator.clipboard.writeText(text); toast(done); }
+  catch(e){ prompt('copy it from here:',text); } }
+// the name an invite greets them by: what YOU call them ("Kak Yana") — unless that's an
+// "only us" nickname, which stays in your household
+const inviteName=pid=>isPrivNick(viewing(),pid)?goesBy(pid):displayName(pid);
+// a general code (⭐ Super settings): anyone with it can join, then claims or adds themselves
+function inviteDialog(code,until){
+  const link=inviteLink(code), day=dayOf(until);
+  const text=`Bear Family Tree 🐻 — you're invited to join our family tree!\n\nOpen ${link} , create an account, then find yourself on the tree and claim your place (or add yourself).\n\nIf it asks for an invite code: ${code}\nIt works until ${day}.`;
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">✉ Invite to the family tree</h3>
+    <div class="card"><div class="label">General invite code</div>
+      <div class="bignick" style="justify-content:center;"><span class="v" id="inv_code" style="font-size:24px;letter-spacing:2px;">${esc(code)}</span></div>
+      <div class="cap2" style="text-align:center;margin-top:6px;">works until ${esc(day)} (14 days) · for anyone who has it</div></div>
     <div class="btnrow">
-      <button class="btn secondary" id="inv_mail">send by email</button>
+      <a class="btn secondary" id="inv_wa" href="${waHref(text)}" target="_blank" rel="noopener">💬 WhatsApp</a>
       <button class="btn primary" id="inv_copy">copy link</button></div>
-    <p class="cap2" style="margin-top:10px;">valid 14 days${forName?` · single use — whoever opens it claims ${esc(forName)}'s profile`:' · anyone with it can join the tree'}</p>`);
-  document.getElementById('inv_copy').onclick=async()=>{
-    try{ await navigator.clipboard.writeText(link); toast('link copied'); }
-    catch(e){ prompt('copy the link:',link); } };
-  document.getElementById('inv_mail').onclick=()=>{ location.href=mail; }; }
-window.makeInvite=async()=>{ const code=await db.invite(); if(code)inviteDialog(code,null); };
+    <p class="cap2" style="margin-top:10px;word-break:break-word;">Send it only to family: anyone with the link or code can join the tree and see everyone on it. The link: ${esc(link)}</p>`);
+  document.getElementById('inv_copy').onclick=()=>copyText(link,'link copied'); }
+window.makeInvite=async()=>{ const inv=await db.invite(); if(inv)inviteDialog(inv.code,new Date(inv.expires_at)); };
 window.inviteFriend=()=>{
   const link=(APP_URL||location.href.split('#')[0])+'#newtree';
-  const mail='mailto:?subject='+encodeURIComponent('Start your own family tree 🐻')
-    +'&body='+encodeURIComponent(`You're invited to create your own family tree on Bear Family Tree! 🐻\n\nOpen this link, create an account, and start your tree — you'll be its first super user:\n\n${link}`);
+  const text=`Bear Family Tree 🐻 — start your own family tree!\n\nOpen ${link} , create an account and set up your tree. You'll be its first keeper, and it's completely separate from ours.`;
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Invite a friend</h3>
-    <div class="card"><div class="label">Share this link</div>
-      <div style="font-size:12px;line-height:17px;word-break:break-all;color:var(--ink-soft);">${esc(link)}</div></div>
+    <div class="card"><div class="label">Their own tree</div>
+      <div class="cap2">They create an account and start a completely separate tree, as its first keeper (⭐). Your family's tree stays private to your family.</div></div>
     <div class="btnrow">
-      <button class="btn secondary" id="fr_mail">send by email</button>
-      <button class="btn primary" id="fr_copy">copy link</button></div>
-    <p class="cap2" style="margin-top:10px;">they'll create an account and start a completely separate tree — as its own first super user. Your family's tree stays private to your family.</p>`);
-  document.getElementById('fr_copy').onclick=async()=>{
-    try{ await navigator.clipboard.writeText(link); toast('link copied'); }
-    catch(e){ prompt('copy the link:',link); } };
-  document.getElementById('fr_mail').onclick=()=>{ location.href=mail; }; };
-window.invitePerson=async(pid)=>{
-  const nm=displayName(pid); // the name YOU call them — "Kak Yana", not the full name
-  let {data,error}=await sb.from('tree_invite')
-    .insert({tree_id:ME.treeId,person_id:pid,invite_name:nm}).select('code').single();
-  if(error&&/invite_name/.test(error.message||'')) // upgrade-2 not run yet — invite still works, just unpersonalised
-    ({data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId,person_id:pid}).select('code').single());
-  if(error){ dbErr(error); return; }
-  inviteDialog(data.code,nm); };
+      <a class="btn secondary" id="fr_wa" href="${waHref(text)}" target="_blank" rel="noopener">💬 WhatsApp</a>
+      <button class="btn primary" id="fr_copy">copy link</button></div>`);
+  document.getElementById('fr_copy').onclick=()=>copyText(link,'link copied'); };
+
+// a person's invite — either one claims them, once:
+//   📷 a QR code to scan face to face: 5 minutes to scan it, then 30 to finish signing up
+//      (the database keeps time, make_qr_invite / open_invite); refresh makes a new code
+//      and the old one goes; closing the sheet deletes a code nobody scanned
+//   💬 a link to send: 14 days, the same link each time until it's used or runs out
+window.invitePerson=pid=>{ const nm=inviteName(pid);
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">✉ Invite ${esc(nm)}</h3>
+    <div class="card"><div class="label">📷 With you now? Let them scan this</div>
+      <div class="qrbox" id="qr_box"><div class="wait">making a code…</div></div>
+      <div class="cap2" id="qr_state" style="text-align:center;min-height:34px;" aria-live="polite"></div>
+      <div class="btnrow" id="qr_again" style="display:none;margin-top:8px;"><button class="btn primary" id="qr_new">↻ refresh — a new code</button></div></div>
+    <div class="card" id="ln_card"><div class="label">💬 Not with you? Send a link</div>
+      <div class="cap2" id="ln_state">a link works for 14 days, once — send it only to ${esc(nm)}</div>
+      <div class="btnrow" id="ln_row"><button class="btn secondary" id="ln_make">make a 14-day link</button></div></div>
+    <p class="cap2" style="margin-top:4px;">Whoever uses the code or the link first takes ${esc(nm)}'s place, so show the QR code to ${esc(nm)} only, face to face. They point their phone's camera at it, create an account and land straight in their place.</p>`);
+  QR={pid,nm}; keepAwake(QR); newQr();
+  document.getElementById('qr_new').onclick=newQr;
+  document.getElementById('ln_make').onclick=()=>personLink(pid,nm); };
+function qrShow(dead,html,again){ const box=document.getElementById('qr_box'); if(!box)return;
+  box.classList.toggle('dead',dead); document.getElementById('qr_state').innerHTML=html;
+  document.getElementById('qr_again').style.display=again?'':'none'; }
+// a brand-new code; the database deletes this person's old one nobody scanned
+async function newQr(){ const q=QR; if(!q)return; clearInterval(q.tick);
+  q.code=null; q.opened=false; q.n=0;
+  document.getElementById('qr_box').innerHTML='<div class="wait">making a code…</div>'; qrShow(false,'');
+  let res; try{ res=await withTimeout(sb.rpc('make_qr_invite',{p:q.pid,invite_nm:q.nm})); }catch(e){ res={error:e}; }
+  if(QR!==q){ if(res.data)dropQr(res.data.code); return; } // the sheet closed meanwhile
+  if(res.error){ qrShow(true,"couldn't make a code — "+esc(isNetErr(res.error)?"we can't reach the family tree right now"
+    :String(res.error.message||'please try again').toLowerCase()),true); return; }
+  q.code=res.data.code; q.end=Date.now()+res.data.seconds*1000;
+  document.getElementById('qr_box').innerHTML=qrSvg(inviteLink(q.code));
+  q.tick=setInterval(()=>qrTick(q),1000); qrTick(q); }
+function qrTick(q){ if(QR!==q)return clearInterval(q.tick);
+  if(q.opened){ if(q.n++%10===0)qrCheck(q); return; }
+  const left=Math.ceil((q.end-Date.now())/1000);
+  if(left>0){ const t=Math.floor(left/60)+':'+String(left%60).padStart(2,'0'), el=document.getElementById('qr_left');
+    // only the minutes and seconds change each second — screen readers hear the states, not the ticking
+    if(el)el.textContent=t; else qrShow(false,`works for <b id="qr_left" aria-hidden="true">${t}</b> · they open their phone's camera and point it here`);
+    if(q.n++%4===0)qrCheck(q); return; }
+  clearInterval(q.tick); qrShow(true,'this code has run out — tap refresh for a new one',true);
+  qrCheck(q); } // scanned in its last seconds?
+// every few seconds: has it been scanned — or used to take their place?
+async function qrCheck(q){ const code=q.code; if(!code)return;
+  const r=await sb.from('tree_invite').select('opened_at,expires_at').eq('code',code).maybeSingle().then(x=>x,e=>({error:e}));
+  if(QR!==q||q.code!==code||r.error)return;
+  const done=()=>{ clearInterval(q.tick); q.code=null; };
+  if(!r.data){ done(); // gone: they took their place, or someone deleted it
+    const c=await sb.from('person').select('claimed_by').eq('id',q.pid).maybeSingle().then(x=>x,e=>({error:e}));
+    if(QR!==q)return;
+    if(c.data&&c.data.claimed_by){ qrShow(true,`🎉 ${esc(q.nm)} has taken their place on the tree`);
+      document.getElementById('ln_card').remove(); scheduleRefetch(); }
+    else qrShow(true,'this code was deleted — tap refresh for a new one',true);
+    return; }
+  if(!r.data.opened_at)return;
+  const until=new Date(r.data.expires_at);
+  if(until<=new Date()){ done(); qrShow(true,`${esc(q.nm)} didn't finish signing up in time — tap refresh for a new code`,true); return; }
+  if(q.opened)return;
+  q.opened=true; clearInterval(q.tick); q.n=1; q.tick=setInterval(()=>qrTick(q),1000);
+  qrShow(true,`✓ scanned — ${esc(q.nm)} has until <b>${esc(timeOf(until))}</b> to finish signing up<br>
+    <button class="link" id="qr_cancel">not ${esc(q.nm)}? cancel this code</button>`);
+  document.getElementById('qr_cancel').onclick=async()=>{
+    if(!confirm(`Cancel this code? Whoever scanned it can't use it to take ${q.nm}'s place any more.`))return;
+    const d=await dropQr(code,true); if(QR!==q)return;
+    if(d.error){ dbErr(d.error); return; }
+    done(); qrShow(true,'code cancelled — tap refresh for a new one',true); }; }
+const dropQr=(code,evenScanned)=>{ let d=sb.from('tree_invite').delete().eq('code',code);
+  if(!evenScanned)d=d.is('opened_at',null); // scanned: they're signing up — leave it for them
+  return d.then(x=>x,e=>({error:e})); };
+// the sheet closed or another opened: a code nobody scanned is deleted, not left in the invites list
+function qrStop(){ const q=QR; if(!q)return; QR=null; clearInterval(q.tick);
+  try{ if(q.lock)q.lock.release(); }catch(e){}
+  if(q.code&&!q.opened)dropQr(q.code); }
+// the phone's screen stays on while the code is showing
+async function keepAwake(q){ try{ const l=await navigator.wakeLock.request('screen');
+  if(QR===q)q.lock=l; else l.release(); }catch(e){} }
+// the 14-day link: the person's live one if there is one, else a new one
+async function personLink(pid,nm){ const row=document.getElementById('ln_row');
+  row.innerHTML='<button class="btn secondary" disabled>making a link…</button>';
+  let {data,error}=await sb.from('tree_invite').select('code,expires_at').eq('person_id',pid).eq('kind','link')
+    .gt('expires_at',new Date().toISOString()).order('expires_at',{ascending:false}).limit(1).then(x=>x,e=>({error:e}));
+  if(!error&&!data.length)({data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId,person_id:pid,invite_name:nm})
+    .select('code,expires_at').then(x=>x,e=>({error:e})));
+  if(!document.getElementById('ln_row'))return;
+  if(error){ dbErr(error); row.innerHTML='<button class="btn secondary" id="ln_make">make a 14-day link</button>';
+    document.getElementById('ln_make').onclick=()=>personLink(pid,nm); return; }
+  const link=inviteLink(data[0].code), day=dayOf(new Date(data[0].expires_at));
+  const text=`${nm}, you're invited to join our family tree on Bear Family Tree 🐻\n\nOpen this link, create an account, and you'll land straight in your place on the tree:\n${link}\n\nIt works once, until ${day}. It's just for you — whoever opens it first takes your place.`;
+  document.getElementById('ln_state').textContent=`works once, until ${day} — send it only to ${nm}`;
+  row.innerHTML=`<a class="btn secondary" id="ln_wa" href="${waHref(text)}" target="_blank" rel="noopener">💬 WhatsApp</a>
+    <button class="btn primary" id="ln_copy">copy link</button>`;
+  document.getElementById('ln_copy').onclick=()=>copyText(link,'link copied — send it only to '+nm); }
 window.makeSuper=async(nid,flag)=>{
   const {error}=await sb.rpc('set_super',{target:nid,flag});
   if(error){ toast((error.message||'failed').toLowerCase()); return; }
@@ -1650,24 +1821,24 @@ window.openAdmin=async()=>{ if(!isSuper()){
       <div class="cap2" style="margin-top:6px;">personal claim-invites live on each unclaimed person's profile (✉ invite … to claim)</div></div>`);
   wireNamesToFill();
   try{
-    const {data,error}=await sb.from('tree_invite').select('*').order('expires_at',{ascending:false});
+    const {data:all,error}=await sb.from('tree_invite').select('*').order('expires_at',{ascending:false});
     const box=document.getElementById('adm_pending'); if(!box)return;
     if(error)throw error;
+    // a QR code lives for minutes: listed while it works, never once it has run out
+    const data=all.filter(i=>!(i.kind==='qr'&&new Date(i.expires_at)<new Date()));
     if(!data.length){ box.textContent='no pending invites'; return; }
-    box.innerHTML=data.map(i=>{ const dead=new Date(i.expires_at)<new Date();
+    box.innerHTML=data.map(i=>{ const dead=new Date(i.expires_at)<new Date(), qr=i.kind==='qr';
       const label=i.invite_name?esc(i.invite_name):(i.person_id?'personal invite':'general code');
       return `<div class="nickrow"><span class="nickname" style="font-size:13px;">${label}
-          <span class="cap2">${esc(i.code)}${dead?' · expired':''}</span></span>
-        <span class="who">${dead?'':`<button class="link" data-copy="${esc(i.code)}">copy</button> · `}
+          <span class="cap2">${qr?`QR code${i.opened_at?' · scanned':''}`:esc(i.code)}${dead?' · expired':''}</span></span>
+        <span class="who">${dead||qr?'':`<button class="link" data-copy="${esc(i.code)}">copy</button> · `}
           <button class="link" data-revoke="${esc(i.code)}">delete</button></span></div>`; }).join('');
     // codes go in data-attributes, never inside onclick="…" strings
     box.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>copyInviteLink(b.dataset.copy));
     box.querySelectorAll('[data-revoke]').forEach(b=>b.onclick=()=>revokeInvite(b.dataset.revoke));
   }catch(e){ const box=document.getElementById('adm_pending');
     if(box)box.textContent="couldn't load invites — "+((e&&e.message)||e); } };
-window.copyInviteLink=async(code)=>{ const link=(APP_URL||location.href.split('#')[0])+'#invite='+code;
-  try{ await navigator.clipboard.writeText(link); toast('link copied'); }
-  catch(e){ prompt('copy the link:',link); } };
+window.copyInviteLink=code=>copyText(inviteLink(code),'link copied');
 window.revokeInvite=async(code)=>{
   if(!confirm('Delete this invite? The link and code stop working immediately.'))return;
   const {error}=await sb.from('tree_invite').delete().eq('code',code);
@@ -1773,6 +1944,19 @@ function renderForgot(prefill){
     try{ ({error}=await withTimeout(sb.auth.signInWithPassword({email,password}))); }catch(e){ error=e; }
     if(error){ renderLogin(false,email,'new password saved — please sign in with it'); return; }
     toast('password changed — welcome back 🐻',4000); enterCloud(); }; }
+// an invite link or QR code was opened: ask the database once — it greets them by name,
+// and a QR code's 30 minutes to finish signing up start now. Resolves to what open_invite
+// answered (null: unknown, used or run out), or undefined when it couldn't be asked.
+let INVITE_INFO=null;
+function openInvite(){ if(!PENDING_INVITE||!sb)return Promise.resolve(undefined);
+  return INVITE_INFO=INVITE_INFO||withTimeout(sb.rpc('open_invite',{invite_code:PENDING_INVITE}))
+    .then(({data,error})=>{ if(error)throw error; return data; })
+    .catch(()=>{ INVITE_INFO=null; return undefined; }); }
+function inviteNote(inv,welcome){
+  if(!inv)return "this invite has run out or has already been used — ask the family for a fresh one (a new QR code, or a new link) 🐻";
+  return [welcome?(inv.name?esc(inv.name)+", you're":"you're")+' invited to join Bear Family Tree! 🐻':'',
+    inv.kind==='qr'?`<span style="font-weight:400;">please finish by ${esc(timeOf(new Date(inv.expires_at)))} — you have 30 minutes</span>`:'']
+    .filter(Boolean).join('<br>'); }
 function renderLogin(signup,prefillEmail,note){
   if(signup===undefined)signup=!!(PENDING_INVITE||PENDING_NEWTREE); // invite links land on Create account
   loginCard(`<h1>Bear Family Tree</h1>
@@ -1816,10 +2000,9 @@ function renderLogin(signup,prefillEmail,note){
   // a real <form> with ONE purpose per view: Safari autofills saved
   // credentials on sign-in, and suggests strong passwords only on sign-up
   document.getElementById('au_form').onsubmit=e=>{ e.preventDefault(); (signup?doUp:doIn)(); };
-  if(PENDING_INVITE&&sb){ // personalise: "Kak Yana, you're invited to join Bear Family Tree!"
-    sb.rpc('invite_preview',{invite_code:PENDING_INVITE}).then(({data})=>{
-      const b=document.getElementById('inv_banner');
-      if(b&&data)b.textContent=data+", you're invited to join Bear Family Tree! 🐻"; }).catch(()=>{}); }
+  // personalise: "Kak Yana, you're invited to join Bear Family Tree!" — or say it has run out
+  openInvite().then(inv=>{ const b=document.getElementById('inv_banner'); if(!b||inv===undefined)return;
+    b.innerHTML=inviteNote(inv,true); });
   document.getElementById('au_sw').onclick=()=>renderLogin(!signup,creds().email);
   const fg=document.getElementById('au_forgot'); if(fg)fg.onclick=()=>renderForgot(creds().email);
   document.getElementById('au_demo').onclick=()=>{ MODE='demo'; DEMO_CHOSEN=true; load();
@@ -1922,18 +2105,21 @@ function renderStartTree(){
 function renderJoinInvited(code){
   loginCard(`<h1>Welcome 🐻</h1>
     <div class="cap">you've been invited — name your household and you'll land in your place</div>
+    <div id="ji_note" class="cap" style="color:var(--primary);font-weight:500;"></div>
     <div class="fld" style="text-align:left;"><span class="flabel">Your household name</span><input id="ji_label" placeholder="e.g. Kak Ina · or Adam & Hana's household"></div>
     <div class="fld" style="text-align:left;"><span class="flabel">Your name for the tree</span><input id="ji_tree" placeholder="e.g. my family"></div>
     <div id="ji_msg" class="cap" style="min-height:18px;"></div>
     <button class="btn primary" style="width:100%;" id="ji_go">Take my place</button>
     <button class="link" id="ji_out" style="margin-top:12px;">sign out</button>`);
+  openInvite().then(inv=>{ const n=document.getElementById('ji_note'); if(n&&inv!==undefined)n.innerHTML=inviteNote(inv,false); });
   document.getElementById('ji_out').onclick=signOut;
   document.getElementById('ji_go').onclick=async()=>{
     const label=document.getElementById('ji_label').value.trim()||'our household';
     const tn=document.getElementById('ji_tree').value.trim()||'our family';
     document.getElementById('ji_msg').textContent='joining…';
     const {data,error}=await sb.rpc('join_with_invite',{invite_code:code,nucleus_label:label,tree_nm:tn});
-    if(error){ document.getElementById('ji_msg').textContent=(error.message||'failed').toLowerCase(); return; }
+    if(error){ document.getElementById('ji_msg').textContent=/invalid or expired/.test(error.message||'')?inviteNote(null)
+      :(error.message||'failed').toLowerCase(); return; }
     try{localStorage.removeItem('bft.pendingInvite');}catch(e){} PENDING_INVITE=null;
     await cloudFetchAll();
     if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);

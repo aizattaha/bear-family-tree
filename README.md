@@ -16,9 +16,11 @@ focus navigation, living-in flags, memorials, blended families, claim-based stew
   checks are green. Run them on a Mac: `bash tests/ci-stack.sh <empty folder> 568`, then in
   `tests/`: `npm ci`, `node permissions.mjs` (with the printed settings), `node smoke.mjs`.
 - **Running it:** `RUNBOOK.md` — site down / database paused, restore a backup, undo a bad
-  release, remove a relative's access, a forgotten password.
+  release, remove a relative's access, a forgotten password, inviting a relative.
 - **No emails:** sign-up has no "confirm your email" step, and a forgotten password comes back
-  through a tree keeper's one-time reset code (`issue_reset_code` / `redeem_reset_code`).
+  through a tree keeper's one-time reset code (`issue_reset_code` / `redeem_reset_code`). Invites
+  go face to face by QR code (`make_qr_invite` / `open_invite`: 5 minutes to scan, then 30 to sign
+  up) or as a 14-day link sent by WhatsApp.
 - **Docs:** `INSTRUCTIONS.md` (how to use it), `family-tree-concept.md` (product spec),
   `wireframe.html` (the annotated wireframe it was built from).
 

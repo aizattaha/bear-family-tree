@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.3",
+    "jsqr": "1.4.0",
     "playwright-core": "1.56.1"
   }
 }
