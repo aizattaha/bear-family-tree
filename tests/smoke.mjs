@@ -107,6 +107,12 @@ await guard('phone', async () => {
   check('phone: touch wording in the hint', /tap a person/.test(await page.textContent('#navhint')));
   await page.locator('.node[data-pid="alya"] .avatar').tap();
   check('phone: one tap opens the card', await sheetOpen(page) && await page.locator('#sheetbody h3', { hasText: 'Alya Aizat' }).count() === 1);
+  // an iPhone zooms the page in on any visible text box under 16px — none allowed
+  const small = await page.evaluate(() => [...document.querySelectorAll('input,select,textarea')]
+    .filter(el => !['checkbox', 'radio', 'file'].includes(el.type) && el.offsetParent !== null && parseFloat(getComputedStyle(el).fontSize) < 16)
+    .map(el => `${el.id || el.tagName.toLowerCase()} ${getComputedStyle(el).fontSize}`));
+  check('phone: every text box (search + card fields) is ≥ 16px, so iPhone never zooms in', small.length === 0, small.join(', '));
+  check('phone: fit-to-screen after search is wired up', await page.evaluate(() => typeof fitToScreen === 'function'));
   await page.evaluate(() => toast("not saved — the family tree didn't accept that change (it may be outside what you can edit). Your screen has been put back.", 7000));
   const box = await page.locator('#toast').boundingBox();
   check('phone: a long message wraps and fits the screen', box && box.width <= 375 && box.height > 50, box && `${Math.round(box.width)}×${Math.round(box.height)}`);
