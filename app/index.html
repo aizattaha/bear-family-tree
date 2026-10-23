@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Bear Family Tree</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,7 +11,7 @@
 <style>
 :root{
   --primary:#004A98; --primary-hover:#003A78; --accent:#B4CEFF; --accent-soft:#E4EEFF;
-  --canvas:#FFFFFF; --muted:#E6E5E5; --field:#F7F9FC; --ink:#1A2B44; --ink-soft:#6B7A90;
+  --canvas:#FFFFFF; --muted:#E6E5E5; --field:#F7F9FC; --ink:#1A2B44; --ink-soft:#55657D;
   --shadow-soft:0 2px 12px rgba(0,74,152,.06);
   --shadow-lift:0 8px 28px rgba(0,74,152,.12);
   --shadow-hero:0 24px 64px rgba(0,74,152,.22), 0 4px 16px rgba(0,74,152,.10);
@@ -20,8 +20,7 @@
 html,body{height:100%;}
 body{font-family:Poppins,Futura,"Century Gothic",-apple-system,sans-serif;background:var(--field);
   color:var(--ink);font-size:15px;line-height:24px;overflow:hidden;
-  touch-action:none;-webkit-text-size-adjust:100%;} /* the page never zooms — only the tree does */
-#sheet,#login{touch-action:pan-y;}
+  touch-action:manipulation;-webkit-text-size-adjust:100%;} /* pinch-zoom the page anywhere but the tree — the tree has its own */
 button{font:inherit;border:0;background:none;cursor:pointer;color:inherit;}
 input,select,textarea{font:inherit;color:var(--ink);}
 @media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important;}}
@@ -58,7 +57,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
 #search{width:100%;background:var(--field);border-radius:999px;border:0;outline:0;
   padding:9px 18px;font-size:13px;color:var(--ink);}
 #search::placeholder{color:var(--ink-soft);}
-#search:focus{box-shadow:0 0 0 2px var(--accent);}
+#search:focus{box-shadow:0 0 0 2px var(--primary);}
 #results{position:absolute;top:42px;left:0;right:0;background:#fff;border-radius:16px;
   box-shadow:var(--shadow-lift);padding:6px;display:none;z-index:40;max-height:260px;overflow:auto;}
 #results button{display:flex;width:100%;text-align:left;gap:10px;align-items:center;
@@ -76,12 +75,16 @@ input,select,textarea{font:inherit;color:var(--ink);}
     opacity .45s cubic-bezier(.4,0,.2,1);}
 .node.spawn{opacity:0;}
 #edges{transition:opacity .3s cubic-bezier(.4,0,.2,1);}
-.addfab{position:absolute;top:-6px;left:16px;width:26px;height:26px;border-radius:50%;
-  background:var(--primary);color:#fff;font-size:15px;font-weight:500;line-height:1;
+/* --fab (set in applyView) counter-scales the ＋ so it stays a finger-sized 32px on screen
+   when the tree is zoomed out; ::after widens the tap target to 44px */
+.addfab{position:absolute;top:-10px;left:10px;width:32px;height:32px;border-radius:50%;
+  background:var(--primary);color:#fff;font-size:18px;font-weight:500;line-height:1;
   display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-lift);
-  opacity:0;transform:scale(.7);pointer-events:none;z-index:3;border:0;cursor:pointer;
+  opacity:0;transform:scale(calc(var(--fab,1)*.7));transform-origin:100% 100%;pointer-events:none;z-index:3;border:0;cursor:pointer;
   transition:opacity .15s cubic-bezier(.4,0,.2,1),transform .15s cubic-bezier(.4,0,.2,1);}
-.node:hover .addfab,.node.selected .addfab{opacity:1;transform:scale(1);pointer-events:auto;}
+.addfab::after{content:'';position:absolute;inset:-6px;border-radius:50%;}
+.node.selected .addfab{opacity:1;transform:scale(var(--fab,1));pointer-events:auto;}
+@media (hover:hover){.node:hover .addfab{opacity:1;transform:scale(var(--fab,1));pointer-events:auto;}}
 .avatar{width:64px;height:64px;border-radius:50%;background:var(--accent-soft);color:var(--primary);
   font-weight:600;font-size:18px;position:relative;display:flex;align-items:center;justify-content:center;
   margin:0 auto 6px;box-shadow:var(--shadow-soft);}
@@ -135,7 +138,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .bignick{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .bignick input{flex:1;background:#fff;border:0;outline:0;border-radius:12px;padding:8px 14px;
   font-size:20px;font-weight:600;color:var(--primary);min-width:0;}
-.bignick input:focus{box-shadow:0 0 0 2px var(--accent);}
+.bignick input:focus{box-shadow:0 0 0 2px var(--primary);}
 .onlyus{display:inline-flex;align-items:center;gap:6px;margin:10px 0 2px;font-size:14px;font-weight:500;cursor:pointer;}
 .onlyus input{width:18px;height:18px;margin:0;accent-color:var(--primary);}
 .node .nick .lock{font-size:9px;margin-left:3px;vertical-align:1px;}
@@ -149,6 +152,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .fld{background:var(--field);border-radius:14px;padding:9px 14px;margin-bottom:10px;}
 .fld .flabel{display:block;font-size:11px;font-weight:500;color:var(--ink-soft);margin-bottom:1px;}
 .fld input,.fld select,.fld textarea{width:100%;background:transparent;border:0;outline:0;font-size:14px;padding:2px 0;}
+.fld:focus-within{background:#fff;box-shadow:0 0 0 2px var(--primary);}
 .fld input:disabled,.fld select:disabled,.fld textarea:disabled{color:var(--ink-soft);}
 .photorow{display:flex;gap:12px;justify-content:space-between;}
 .pslot{flex:1;text-align:center;}
@@ -163,12 +167,17 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .grouphdr{font-size:11px;font-weight:500;color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase;margin:14px 0 6px;}
 .viewonly{background:var(--accent-soft);border-radius:12px;padding:8px 14px;font-size:12px;
   color:var(--primary);margin-bottom:12px;}
-#toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,80px);background:var(--ink);color:#fff;
-  border-radius:999px;padding:9px 20px;font-size:13px;font-weight:500;z-index:60;opacity:0;
-  transition:all .25s cubic-bezier(.4,0,.2,1);pointer-events:none;max-width:88vw;white-space:nowrap;
-  overflow:hidden;text-overflow:ellipsis;}
+/* long messages wrap (up to 3 lines) instead of being cut off at phone width */
+#toast{position:fixed;left:50%;bottom:28px;transform:translate(-50%,120px);background:var(--ink);color:#fff;
+  border-radius:18px;padding:9px 20px;font-size:13px;line-height:19px;font-weight:500;z-index:60;opacity:0;
+  transition:all .25s cubic-bezier(.4,0,.2,1);pointer-events:none;width:max-content;max-width:min(88vw,460px);
+  text-align:center;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden;}
 #toast.show{transform:translate(-50%,0);opacity:1;}
-:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+:focus-visible{outline:2px solid var(--primary);outline-offset:2px;}
+.faq{border-top:1px solid var(--muted);padding:10px 0;}
+.faq:first-of-type{border-top:0;padding-top:2px;}
+.faq .q{display:block;font-size:14px;font-weight:600;margin-bottom:2px;}
+.faq p{font-size:13px;line-height:20px;color:var(--ink);}
 </style>
 </head>
 <body>
@@ -189,6 +198,7 @@ input,select,textarea{font:inherit;color:var(--ink);}
     <button class="iconbtn" id="zoomIn">+</button>
     <button class="chip" id="homeBtn">◎ me</button>
     <button class="iconbtn" id="tutBtn" title="tutorial">🎓</button>
+    <button class="iconbtn" id="helpBtn" title="help" aria-label="help">?</button>
     <button class="iconbtn" id="adminBtn" title="super settings" style="display:none;">⭐</button>
   </div>
   <div id="viewport">
@@ -201,15 +211,19 @@ input,select,textarea{font:inherit;color:var(--ink);}
 
 <div id="scrim"></div>
 <div id="sheet"><div class="handle"></div><div id="sheetbody"></div></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <input type="file" id="fileinput" accept="image/*" style="display:none">
 
 <script>
 'use strict';
 /* Bear Family Tree — cloud build */
-// iOS Safari: block browser page-pinch entirely; the tree has its own zoom
-document.addEventListener('gesturestart',e=>e.preventDefault());
-document.addEventListener('gesturechange',e=>e.preventDefault());
+// iOS Safari: a pinch on the tree zooms the tree, not the page; everywhere else
+// the page zooms as normal, so anyone can make the text bigger
+const onTree=e=>!!(e.target&&e.target.closest&&e.target.closest('#viewport'));
+document.addEventListener('gesturestart',e=>{ if(onTree(e))e.preventDefault(); });
+document.addEventListener('gesturechange',e=>{ if(onTree(e))e.preventDefault(); });
+// phones and tablets: one tap opens a person. A mouse keeps click = select, double-click = open
+const COARSE=matchMedia('(pointer: coarse)').matches;
 /* ================= cloud config ================= */
 const SUPABASE_URL='https://garbnserzkuazmvonfem.supabase.co';
 const SUPABASE_KEY='sb_publishable_I-mPsmgwDuPqc20Y09iZ7g_lL1Z_sBp';
@@ -347,33 +361,56 @@ function personFromRow(r){ const photos={};
   return {id:r.id,name:r.full_name,gender:r.gender||'',couplePos:r.couple_pos||'',born:r.born||'',
     country:r.living_country||'',notes:r.notes||'',claimedBy:r.claimed_by,photos,
     mainPhoto:DB2MAIN[r.main_photo]||'a',passed:null}; }
+// the data API hands back at most 1,000 rows per request: read every page, in a
+// fixed order, so a big family never silently loses people, links or nicknames
+const PAGE=1000;
+async function fetchAll(table,order,tree,extra){
+  const q=()=>{ let x=sb.from(table).select('*',{count:'exact'}).eq('tree_id',tree).order(order);
+    return extra?extra(x):x; };
+  const first=await q().range(0,PAGE-1); if(first.error)throw first.error;
+  let rows=first.data; const total=first.count??rows.length, step=rows.length||PAGE;
+  while(rows.length<total){ const {data,error}=await q().range(rows.length,rows.length+step-1);
+    if(error)throw error; if(!data.length)break; rows=rows.concat(data); }
+  return rows; }
 async function cloudFetchAll(){
-  const [acc,nuc,per,rel,nick,mem]=await withTimeout(Promise.all([
-    sb.from('account').select('nucleus_id'),
-    sb.from('nucleus').select('*'),
-    sb.from('person').select('*').is('deleted_at',null),
-    sb.from('relationship').select('*'),
-    sb.from('nickname').select('*'),
-    sb.from('memorial').select('*')]));
-  for(const r of [acc,nuc,per,rel,nick,mem]) if(r.error)throw r.error;
+  const acc=await withTimeout(sb.from('account').select('nucleus_id,nucleus(tree_id)'));
+  if(acc.error)throw acc.error;
   ME.nucleusId=acc.data[0]?.nucleus_id||null;
   if(!ME.nucleusId)return false; // no account row yet → onboarding
-  S.nuclei={}; nuc.data.forEach(n=>{S.nuclei[n.id]={id:n.id,treeName:n.tree_name,label:n.label,isSuper:!!n.is_super};});
-  ME.treeId=nuc.data.find(n=>n.id===ME.nucleusId)?.tree_id;
-  S.persons={}; per.data.forEach(r=>S.persons[r.id]=personFromRow(r));
-  mem.data.forEach(m=>{ const p=S.persons[m.person_id];
+  const tree=acc.data[0].nucleus?.tree_id; if(!tree)throw new Error("couldn't find your family's tree");
+  // only this family's rows, page by page
+  const [nuc,per,rel,nick,mem]=await withTimeout(Promise.all([
+    fetchAll('nucleus','id',tree), fetchAll('person','id',tree,x=>x.is('deleted_at',null)),
+    fetchAll('relationship','id',tree), fetchAll('nickname','id',tree), fetchAll('memorial','person_id',tree)]),30000);
+  S.nuclei={}; nuc.forEach(n=>{S.nuclei[n.id]={id:n.id,treeName:n.tree_name,label:n.label,isSuper:!!n.is_super};});
+  ME.treeId=tree;
+  S.persons={}; per.forEach(r=>S.persons[r.id]=personFromRow(r));
+  mem.forEach(m=>{ const p=S.persons[m.person_id];
     if(p)p.passed={date:m.passed_on||'',styleId:m.style_id||'gen1',custom:m.custom_text||''}; });
   // a link to someone removed (or half-removed) must never blank the tree
-  S.rels=rel.data.filter(r=>S.persons[r.person_a]&&S.persons[r.person_b]).map(r=>({id:r.id,kind:r.kind==='partner'?'pt':'pc',a:r.person_a,b:r.person_b,
+  S.rels=rel.filter(r=>S.persons[r.person_a]&&S.persons[r.person_b]).map(r=>({id:r.id,kind:r.kind==='partner'?'pt':'pc',a:r.person_a,b:r.person_b,
     status:r.status||'together',ended:r.ended||undefined}));
   // private rows arrive only for the two households involved — the database filters the rest
-  S.nicknames={}; S.nickPriv={}; nick.data.forEach(n=>{
+  S.nicknames={}; S.nickPriv={}; nick.forEach(n=>{
     (S.nicknames[n.viewer_person_id]=S.nicknames[n.viewer_person_id]||{})[n.person_id]=n.text;
     if(n.private)(S.nickPriv[n.viewer_person_id]=S.nickPriv[n.viewer_person_id]||{})[n.person_id]=true; });
   return true; }
 // "can't reach Supabase" looks different in every browser — one test for all of them
 const isNetErr=e=>!!e&&(e.name==='AuthRetryableFetchError'||
   /failed to fetch|load failed|networkerror|network request failed|timed out/i.test(String(e.message||e)));
+// sign-in problems in plain words — the library's own text ("invalid login credentials") means nothing to Granny
+const AUTH_MSGS=[
+  [/invalid_credentials|invalid login credentials/i,`that email and password don't match — check for a typo, or tap "forgot password?"`],
+  [/email_not_confirmed|email not confirmed/i,'please confirm your email first — open the link we emailed you (check spam too), then sign in'],
+  [/user_already_exists|already registered|already been registered/i,`there's already an account with that email — sign in instead, or tap "forgot password?"`],
+  [/email_address_invalid|invalid format|validate email|invalid email/i,"that doesn't look like an email address — please check it"],
+  [/same_password|should be different/i,"that's your current password — choose a different one"],
+  [/weak_password|password should (be at least|contain)|password is known|too weak/i,'please choose a longer password — at least 6 characters, and not an easy one to guess'],
+  [/rate_limit|rate limit|too many|only request this after/i,'too many tries just now — please wait a minute, then try again'],
+  [/signup_disabled|signups not allowed/i,'new accounts are switched off right now — ask the family member who invited you']];
+function authMsg(e,fallback){ const s=((e&&e.code)||'')+' '+((e&&e.message)||'');
+  const hit=AUTH_MSGS.find(([re])=>re.test(s));
+  return hit?hit[1]:fallback+' — '+String((e&&e.message)||e).toLowerCase(); }
 function withTimeout(p,ms){ return Promise.race([p,new Promise((_,no)=>
   setTimeout(()=>no(new Error('timed out')),ms||15000))]); }
 function dbErr(e){ console.error('sync',e);
@@ -415,15 +452,14 @@ const db={
       .eq('id',r.id)); }); },
   deleteRelPair(a,b){ return attempt(()=>wrote(sb.from('relationship').delete().eq('kind','partner')
       .or(`and(person_a.eq.${a},person_b.eq.${b}),and(person_a.eq.${b},person_b.eq.${a})`))); },
-  deletePerson(pid,hadLinks){ return attempt(async()=>{
-    // person first, while their links still prove they're within reach;
-    // if the database says no, nothing has changed yet
-    await wrote(sb.from('person').update({deleted_at:new Date().toISOString()}).eq('id',pid));
-    if(hadLinks){ const {error}=await sb.from('relationship').delete()
-      .or(`person_a.eq.${pid},person_b.eq.${pid}`);
-      if(error)console.error('sync',error); } }); }, // links to a removed person are ignored on load
+  // one database step: the person, their links, names, memorial and open invites
+  // all go together — or, if the database says no, nothing changes at all
+  deletePerson(pid){ return attempt(async()=>{
+    const {error}=await sb.rpc('remove_person',{p:pid}); if(error)throw error; }); },
   claim(pid){ return attempt(async()=>{
     const {error}=await sb.rpc('claim_person',{p:pid}); if(error)throw error; }); },
+  releaseClaim(pid){ return attempt(async()=>{
+    const {error}=await sb.rpc('release_claim',{p:pid}); if(error)throw error; }); },
   renameNucleus(name){ return attempt(()=>wrote(sb.from('nucleus').update({tree_name:name})
       .eq('id',ME.nucleusId))); },
   async invite(){ const {data,error}=await sb.from('tree_invite').insert({tree_id:ME.treeId})
@@ -609,7 +645,8 @@ function removeExpansion(kind,pid){ const key=kind+':'+pid;
   updateFocusBar(); }
 function resetView(){
   const oldPos=snapshotPositions(), oldView={...view};
-  S.active=defaultExpansions().map(expKey);
+  // forget the parked branches too, or the "focused: …" bar would stay up
+  S.history=defaultExpansions(); S.active=S.history.map(expKey); lastFocusLabel='';
   save(); rebuild(viewing()); centerOn(viewing()); flipExisting(oldPos,oldView);
   updateFocusBar(); }
 function updateFocusBar(label){
@@ -772,7 +809,8 @@ function computeLayout(vis){
 const worldEl=document.getElementById('world'), nodesEl=document.getElementById('nodes'),
       edgesEl=document.getElementById('edges');
 let view={tx:0,ty:0,s:1};
-function applyView(){ worldEl.style.transform=`translate(${view.tx}px,${view.ty}px) scale(${view.s})`; drawMinimap(); }
+function applyView(){ worldEl.style.transform=`translate(${view.tx}px,${view.ty}px) scale(${view.s})`;
+  worldEl.style.setProperty('--fab',Math.min(2.2,Math.max(1,1/view.s)).toFixed(3)); drawMinimap(); }
 const nodeEls=new Map(); let edgeT=null;
 function rebuild(origin){
   const vis=computeVisible(); computeLayout(vis);
@@ -799,7 +837,7 @@ function rebuild(origin){
       else { // broken line + genealogical ⫽ divorce mark + chip badge
         svg+=`<line x1="${x1}" y1="${y}" x2="${mx-16}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5" stroke-dasharray="5 5"/>`;
         svg+=`<line x1="${mx+16}" y1="${y}" x2="${x2}" y2="${y}" stroke="#E6E5E5" stroke-width="1.5" stroke-dasharray="5 5"/>`;
-        svg+=`<text x="${mx}" y="${y+5}" text-anchor="middle" font-size="15" font-weight="600" fill="#6B7A90" font-family="Poppins,sans-serif">⫽</text>`;
+        svg+=`<text x="${mx}" y="${y+5}" text-anchor="middle" font-size="15" font-weight="600" fill="#55657D" font-family="Poppins,sans-serif">⫽</text>`;
         const lab=st+(rel&&rel.ended?' · '+rel.ended:''); const lw=lab.length*6+18;
         svg+=`<rect x="${mx-lw/2}" y="${y-32}" width="${lw}" height="19" rx="9.5" fill="#E4EEFF"/>`;
         svg+=`<text x="${mx}" y="${y-19}" text-anchor="middle" font-size="10.5" font-weight="500" fill="#004A98" font-family="Poppins,sans-serif">${esc(lab)}</text>`; } } }
@@ -895,9 +933,11 @@ nodesEl.addEventListener('click',e=>{
   const chip=e.target.closest('.xchip');
   if(chip){ const act=pendingChips[chip.dataset.chip]; if(act)act(); return; }
   const node=e.target.closest('.node');
-  if(node&&!dragMoved){ // single click selects (floats the ＋); double-click opens
+  if(node&&!dragMoved){ // a click selects (floats the ＋); double-click opens
     nodesEl.querySelectorAll('.node.selected').forEach(n=>n.classList.remove('selected'));
-    node.classList.add('selected'); } });
+    node.classList.add('selected');
+    // a finger opens them straight away — the ＋ stays on them for when the card closes
+    if(COARSE||lastPointer==='touch'||lastPointer==='pen')openPerson(node.dataset.pid); } });
 nodesEl.addEventListener('dblclick',e=>{
   if(e.target.closest('.addfab')||e.target.closest('.xchip'))return;
   const node=e.target.closest('.node');
@@ -907,10 +947,11 @@ document.getElementById('viewport').addEventListener('click',e=>{ if(!e.target.c
 
 /* ================= pan / zoom ================= */
 const vp=document.getElementById('viewport');
-let dragMoved=false;
+let dragMoved=false, lastPointer='mouse';
 (function(){
   const pointers=new Map(); let last=null,pinchD=0;
-  vp.addEventListener('pointerdown',e=>{ if(e.target.closest('.xchip')||e.target.closest('#focusbar')||e.target.closest('#minimap'))return;
+  vp.addEventListener('pointerdown',e=>{ lastPointer=e.pointerType||'mouse';
+    if(e.target.closest('.xchip')||e.target.closest('#focusbar')||e.target.closest('#minimap'))return;
     // NOTE: no setPointerCapture here — capturing on press retargets the
     // click/dblclick to the canvas and node taps never fire. We capture
     // only once a real drag begins (in pointermove).
@@ -947,7 +988,9 @@ function centerOn(pid){ const p=layout.pos[pid]; if(!p)return;
 document.getElementById('zoomIn').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1.2);};
 document.getElementById('zoomOut').onclick=()=>{const r=vp.getBoundingClientRect();zoomAt(r.left+r.width/2,r.top+r.height/2,1/1.2);};
 document.getElementById('homeBtn').onclick=()=>centerOn(viewing());
+if(COARSE)document.getElementById('navhint').textContent='tap a person to open them · drag to move · pinch to zoom';
 document.getElementById('tutBtn').onclick=()=>openTutorial(false);
+document.getElementById('helpBtn').onclick=()=>openHelp();
 document.getElementById('adminBtn').onclick=()=>openAdmin();
 document.getElementById('showall').onclick=resetView;
 
@@ -974,15 +1017,22 @@ mm.addEventListener('click',e=>{ const {bounds}=layout; const r=mm.getBoundingCl
 const scrim=document.getElementById('scrim'), sheet=document.getElementById('sheet'),
       sheetbody=document.getElementById('sheetbody');
 let sheetPid=null; // whose card is open, so a refused save can redraw it
+let sheetOpenedAt=0;
 function refreshSheet(pid){ if(sheetPid===pid&&sheet.classList.contains('open')&&person(pid))openPerson(pid); }
-function openSheet(html,pid){ sheetbody.innerHTML=html; sheetPid=pid||null;
+function openSheet(html,pid){ const same=sheet.classList.contains('open')&&sheetPid&&sheetPid===(pid||null);
+  const keep=same?sheet.scrollTop:0;
+  sheetbody.innerHTML=html; sheetPid=pid||null;
+  // a new card starts at the top; redrawing the same card (after a save) keeps your place
+  sheet.scrollTop=keep; if(!same)sheetOpenedAt=Date.now();
   // person-data fields must never trigger contact/credit-card autofill
   sheetbody.querySelectorAll('input:not([autocomplete]),textarea:not([autocomplete])')
     .forEach(i=>i.setAttribute('autocomplete','off'));
   scrim.style.display='block';
   requestAnimationFrame(()=>sheet.classList.add('open')); }
 function closeSheet(){ sheet.classList.remove('open'); scrim.style.display='none'; }
-scrim.onclick=closeSheet;
+// the second tap of a habitual double-tap lands on the scrim — don't let it close the card it just opened
+function scrimClose(){ if(Date.now()-sheetOpenedAt>450)closeSheet(); }
+scrim.onclick=scrimClose;
 let toastT=null;
 function toast(msg,ms){ const t=document.getElementById('toast'); t.textContent=msg;
   t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),ms||2600); }
@@ -994,7 +1044,10 @@ function openTutorial(forced){ TUT_STEP=0; TUT_FORCED=!!forced; renderTutorial()
 function renderTutorial(){
   const steps=[
     {t:'Welcome to the tree 🐻',b:`This is a map of your family. <b>Drag</b> to move around, <b>scroll or pinch</b> to zoom, and tap <b>◎ me</b> any time to come home to yourself.<br><br>Tap a <b>⊕ chip</b> under a person to unfold their side of the family — one side opens at a time, so it never gets messy. <b>back to my view</b> folds everything again.`},
-    {t:'People',b:`<b>Click</b> a person once and a <b>＋</b> appears — tap it to add their parent, partner or child. <b>Double-click</b> opens their full card.<br><br>Set <b>your own nickname</b> for anyone — you'll see "Atok" where your cousin sees "Pak Cik". Everyone sees the tree in their own words.`},
+    {t:'People',b:(COARSE
+      ?`<b>Tap</b> a person to open their card — <b>Add relative</b> is in there. When you close it, a <b>＋</b> stays on them for quick adding.`
+      :`<b>Click</b> a person once and a <b>＋</b> appears — tap it to add their parent, partner or child. <b>Double-click</b> opens their full card.`)
+      +`<br><br>Set <b>your own nickname</b> for anyone — you'll see "Atok" where your cousin sees "Pak Cik". Everyone sees the tree in their own words.`},
     {t:'Make it yours',b:`Open your own card to add <b>photos</b> (young kid · teen · adult), the name you go by, and where you live — the flag shows on your circle.<br><br>People you add start <b>unverified</b> — nearby family keeps their profiles right until they claim themselves. Anything you fill in helps the whole family.`}];
   const s=steps[TUT_STEP];
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:8px;">${s.t}</h3>
@@ -1010,7 +1063,25 @@ function renderTutorial(){
   document.getElementById('tut_next').onclick=()=>{
     if(TUT_STEP<2){ TUT_STEP++; renderTutorial(); return; }
     try{ localStorage.setItem(tutKey(),'1'); }catch(e){}
-    TUT_FORCED=false; scrim.onclick=closeSheet; closeSheet(); }; }
+    TUT_FORCED=false; scrim.onclick=scrimClose; closeSheet(); }; }
+
+/* ================= help ================= */
+// the WhatsApp link only pre-fills a message — the person picks the family chat
+// themselves, so no phone number lives in this (public) code
+const WA_LINK='https://wa.me/?text='+encodeURIComponent('Bear Family Tree 🐻 — I need a hand with: ');
+function openHelp(){
+  const faqs=[
+    ['I forgot my password',`Sign out (at the bottom of your own card), tap <b>forgot password?</b> and type your email. A link arrives by email — check spam too — and lets you choose a new password. No email after 10 minutes? Message the family below and a tree keeper will help.`],
+    ["How do I open someone's card?",COARSE?`<b>Tap</b> them on the tree. Or type their name in <b>search the family…</b> at the top.`
+      :`<b>Double-click</b> them on the tree (one click shows the ＋). Or type their name in <b>search the family…</b> at the top.`],
+    ['How do I add a child, parent or partner?',`Open the person's card, tap <b>Add relative</b>, type the name, then choose how they're connected — parent, partner, child or sibling — and tap <b>Save</b>.`],
+    ['Who can change what?',`Your household looks after the people it has claimed. People nobody has claimed yet can be updated by family within 5 branches. Tree keepers (⭐) can help with everyone. The names <i>you</i> call people are yours alone — 🔒 only us names are seen just by you and that person's household.`],
+    ['How do I invite a relative?',`Tree keepers (⭐) open the relative's card and tap <b>✉ invite … to claim this profile</b>, then share the link — WhatsApp works well. Not a keeper? Ask one, or message the family below.`]];
+  openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Help</h3>
+    <div class="card">${faqs.map(([q,a])=>`<div class="faq"><span class="q">${q}</span><p>${a}</p></div>`).join('')}</div>
+    <div class="btnrow" style="margin-top:4px;">
+      <a class="btn primary" href="${WA_LINK}" target="_blank" rel="noopener" style="text-decoration:none;">💬 Message the family on WhatsApp</a></div>
+    <p class="cap2" style="margin-top:10px;text-align:center;">opens WhatsApp with a message started — pick the family chat and say what's tricky</p>`); }
 
 /* ================= person sheet ================= */
 const SLOT_LABELS={k:'young kid',t:'teen · young adult',a:'adult'};
@@ -1168,6 +1239,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
       <button class="btn secondary" onclick="openAdd('${pid}')">Add relative</button>
       ${(editable||memEditable)?`<button class="btn primary" onclick="savePerson('${pid}')">Save</button>`:''}
     </div>
+    ${per.claimedBy&&isSuper()?`<button class="link" style="display:block;margin:14px auto 0;" onclick="releaseClaimUI('${pid}')">release this claim</button>`:''}
     ${editable?`<button class="link" style="display:block;margin:14px auto 0;color:var(--bad,#D25353);" onclick="deletePersonUI('${pid}')">remove ${esc(displayName(pid))} from the tree</button>`:''}`,pid);
   document.getElementById('moreBtn').onclick=()=>{ const m=document.getElementById('moreFields');
     const show=m.style.display==='none'; m.style.display=show?'block':'none';
@@ -1241,13 +1313,23 @@ window.deletePersonUI=async(pid)=>{ const per=person(pid); if(!per||pid===viewin
   for(const v in S.nicknames)delete S.nicknames[v][pid];
   delete S.nicknames[pid];
   save(); closeSheet(); rebuild(); toast('removed — '+per.name);
-  if(!await db.deletePerson(pid,links.length>0)){ S.persons[pid]=per; S.rels.push(...links);
+  if(!await db.deletePerson(pid)){ S.persons[pid]=per; S.rels.push(...links);
     if(own)S.nicknames[pid]=own;
     for(const v in nicks)(S.nicknames[v]=S.nicknames[v]||{})[pid]=nicks[v];
     undone(); } };
-window.claimPerson=async(pid)=>{ const was=person(pid).claimedBy; person(pid).claimedBy=S.session.nucleusId;
+// claiming locks a profile to one household, so say so before it happens
+const claimOk=name=>confirm(`Is ${name} you, or someone in your household?\n\nAfter you claim them, only your household can change their details. A tree keeper (⭐) can undo this later.`);
+window.claimPerson=async(pid)=>{ if(!claimOk(person(pid).name))return;
+  const was=person(pid).claimedBy; person(pid).claimedBy=S.session.nucleusId;
   save(); openPerson(pid); toast('claimed into your nucleus');
   if(!await db.claim(pid)){ person(pid).claimedBy=was; undone(pid); } };
+// tree keepers only: the profile goes back to unverified and can be claimed again (the database keeps a record)
+window.releaseClaimUI=async(pid)=>{ const per=person(pid); if(!per||!per.claimedBy||!isSuper())return;
+  const house=S.nuclei[per.claimedBy]?.label||'their household';
+  if(!confirm(`Release ${per.name} from ${house}?\n\nThe profile goes back to unverified: family nearby can edit it again, and the right person can claim it. ${house} keeps its login. This is recorded.`))return;
+  const was=per.claimedBy; per.claimedBy=null;
+  save(); rebuild(); openPerson(pid); toast('claim released — '+per.name);
+  if(!await db.releaseClaim(pid)){ per.claimedBy=was; undone(pid); } };
 // Born is a year or a full date — the database refuses anything else, so say so here first
 function bornOk(b){ if(!b||BORN_RE.test(b))return true;
   toast('born should be a year like 1950, or a full date like 1950-06-04',5000); return false; }
@@ -1297,19 +1379,21 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
        ['child','↓','Child of '+esc(displayName(anchor))+(partnerOf(anchor)?' & '+esc(displayName(partnerOf(anchor))):''),true,''],
        ...(partnerOf(anchor)?[['childsolo','↓','Child of '+esc(displayName(anchor))+' only',true,'from another relationship — hangs from them alone']]:[]),
        ['sibling','↔','Sibling of '+esc(displayName(anchor)),canSibling,canSibling?'shares their parents':'add a parent first']]
-      .map(([k,ic,lb,ok,sub])=>`<button class="choice" data-rel="${k}" ${ok?'':'disabled style="opacity:.45;cursor:default;"'}>
+      .map(([k,ic,lb,ok,sub])=>`<button class="choice" data-rel="${k}" aria-pressed="false" ${ok?'':'disabled style="opacity:.45;cursor:default;"'}>
         <span class="itile">${ic}</span><span>${lb}${sub?`<span class="sub">${sub}</span>`:''}</span></button>`).join('')}
-    <div class="btnrow"><button class="btn primary" id="a_save">Save</button></div>
-    <p class="cap2" style="margin-top:10px;">saved as unverified — anyone within 5 branches can care for this profile until it's claimed.</p>`);
-  let rel='partner';
+    <div class="btnrow"><button class="btn primary" id="a_save" style="opacity:.5;">Save</button></div>
+    <p class="cap2" id="a_hint" style="margin-top:10px;">choose how they're connected, then Save. They're saved as unverified — anyone within 5 branches can care for this profile until it's claimed.</p>`);
+  // nothing is pre-chosen: a quick "type a name, hit Save" must never invent a marriage
+  let rel=null;
   sheetbody.querySelectorAll('.choice[data-rel]').forEach(b=>{
-    if(b.dataset.rel==='partner')b.style.outline='2px solid var(--accent)';
     b.onclick=()=>{ if(b.disabled)return; rel=b.dataset.rel;
-      sheetbody.querySelectorAll('.choice').forEach(x=>x.style.outline='');
-      b.style.outline='2px solid var(--accent)'; }; });
+      sheetbody.querySelectorAll('.choice').forEach(x=>{x.style.outline='';x.setAttribute('aria-pressed','false');});
+      b.style.outline='2px solid var(--primary)'; b.setAttribute('aria-pressed','true');
+      document.getElementById('a_save').style.opacity=''; }; });
   document.getElementById('a_save').onclick=()=>{
     const name=document.getElementById('a_name').value.trim();
     if(!name){toast('name is needed');return;}
+    if(!rel){toast("choose how they're connected — parent, partner, child or sibling");return;}
     if(!bornOk(document.getElementById('a_born').value.trim()))return;
     const id=(MODE==='cloud'&&crypto.randomUUID)?crypto.randomUUID():'p'+Date.now().toString(36);
     S.persons[id]={id,name,gender:document.getElementById('a_gender').value,couplePos:'',
@@ -1559,7 +1643,7 @@ function renderForgot(prefill){
     try{ const {error}=await withTimeout(sb.auth.resetPasswordForEmail(email,{redirectTo:APP_URL}));
       if(error)throw error; }
     catch(e){ if(isNetErr(e)){renderOffline(()=>renderForgot(email));return;}
-      msg((e.message||'could not send the link').toLowerCase()); return; }
+      msg(authMsg(e,'could not send the link')); return; }
     msg("if that email has a login, a reset link is on its way — open it on this phone or computer. It can take a few minutes; check spam too."); }; }
 let RECOVERING=RESET_LINK; // arrived from a reset email → choose a new password before anything else
 function renderNewPassword(){ RECOVERING=true;
@@ -1577,7 +1661,7 @@ function renderNewPassword(){ RECOVERING=true;
     msg('saving…');
     try{ const {error}=await withTimeout(sb.auth.updateUser({password})); if(error)throw error; }
     catch(e){ if(isNetErr(e)){renderOffline(renderNewPassword);return;}
-      msg((e.message||'could not save the password').toLowerCase()); return; }
+      msg(authMsg(e,'could not save the password')); return; }
     RECOVERING=false;
     try{ history.replaceState(null,'',location.pathname+location.search); }catch(e){}
     toast('password changed — welcome back 🐻',4000); enterCloud(); }; }
@@ -1608,14 +1692,14 @@ function renderLogin(signup,prefillEmail,note){
     msg('signing in…');
     let error; try{ ({error}=await withTimeout(sb.auth.signInWithPassword(c))); }catch(e){ error=e; }
     if(error&&isNetErr(error)){renderOffline(back(c.email));return;}
-    if(error)msg((error.message||'sign-in failed').toLowerCase()); else enterCloud(); };
+    if(error)msg(authMsg(error,'sign-in failed')); else enterCloud(); };
   const doUp=async()=>{ if(!sb){renderOffline();return;}
     const c=creds(); if(!c.email||!c.password){msg('email and password, please');return;}
     if(c.password.length<6){msg('password needs at least 6 characters');return;}
     msg('creating account…');
     let data,error; try{ ({data,error}=await withTimeout(sb.auth.signUp(c))); }catch(e){ error=e; }
     if(error&&isNetErr(error)){renderOffline(back(c.email));return;}
-    if(error)msg((error.message||'sign-up failed').toLowerCase());
+    if(error)msg(authMsg(error,'sign-up failed'));
     else if(!data.session)msg('account created — check your email to confirm, then sign in');
     else enterCloud(); };
   // a real <form> with ONE purpose per view: Safari autofills saved
@@ -1754,7 +1838,7 @@ function renderWhoAreYou(){
     <div class="fld" style="text-align:left;margin-top:10px;"><span class="flabel">or add yourself — full name</span><input id="wa_name"></div>
     <button class="btn primary" style="width:100%;" id="wa_new">Add me</button>`);
   document.querySelectorAll('[data-claim]').forEach(b=>b.onclick=async()=>{
-    const pid=b.dataset.claim;
+    const pid=b.dataset.claim; if(!claimOk(S.persons[pid].name))return;
     const {error}=await sb.rpc('claim_person',{p:pid});
     if(error){toast((error.message||'claim failed').toLowerCase());return;}
     S.persons[pid].claimedBy=ME.nucleusId; startSession(ME.nucleusId,pid); });
