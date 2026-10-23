@@ -41,6 +41,8 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .choice .itile{width:38px;height:38px;border-radius:12px;background:var(--accent-soft);
   color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none;font-weight:600;}
 .choice .sub{display:block;font-size:11px;font-weight:400;color:var(--ink-soft);line-height:15px;}
+.choice .itile.unknown{background:#fff;border:2px dashed #8FB0E6;}
+#sheet .card .choice{background:#fff;} #sheet .card .choice:hover{background:var(--accent-soft);}
 
 /* ---------- app bar ---------- */
 #app{position:fixed;inset:0;display:none;flex-direction:column;}
@@ -64,6 +66,9 @@ input,select,textarea{font:inherit;color:var(--ink);}
   padding:8px 10px;border-radius:12px;font-size:13px;}
 #results button:hover{background:var(--field);}
 #results .rn{font-weight:500;white-space:nowrap;} #results .rf{font-size:11px;color:var(--ink-soft);}
+#results .rn.unknownname{font-weight:400;}
+/* phones: the search box is narrow, so its results use the screen's width (from its right edge) */
+@media (max-width:520px){ #results{left:auto;width:calc(100vw - 32px);} #results button{flex-wrap:wrap;row-gap:0;} }
 
 /* ---------- canvas ---------- */
 #viewport{flex:1;position:relative;overflow:hidden;touch-action:none;cursor:grab;}
@@ -97,6 +102,11 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .node.passed .avatar{filter:grayscale(1);opacity:.82;box-shadow:none;outline:1px solid var(--muted);}
 .node.passed .nick{color:var(--ink-soft);}
 .node.exdim{opacity:.7;} /* married-in ex: still around, visibly not core family */
+/* a name still to fill in ("?"): a dashed gap waiting for its name — never the
+   greyscale of a memorial or the fade of a married-in ex */
+.avatar.unknown{background:#fff;border:2px dashed #8FB0E6;box-shadow:none;color:var(--primary);}
+.node.unknown .nick,.node.unknown .full,.unknownname{color:var(--ink-soft);font-style:italic;}
+.node .nick.two{white-space:normal;line-height:16px;text-wrap:balance;}
 .node.you .avatar{outline:3px solid var(--primary);outline-offset:3px;
   box-shadow:0 0 0 10px rgba(180,206,255,.5),0 10px 30px rgba(0,74,152,.28);}
 .youchip{display:inline-block;margin-top:3px;background:var(--primary);color:#fff;border-radius:999px;
@@ -250,7 +260,7 @@ try{ const m=location.hash.match(/invite=([A-Za-z0-9]+)/);
   PENDING_NEWTREE=localStorage.getItem('bft.pendingNewTree'); }catch(e){}
 const isSuper=()=>MODE==='cloud'&&!!(S&&S.nuclei[ME.nucleusId]||{}).isSuper;
 /* ================= data ================= */
-const LS_KEY='bearFamilyTree.v9';
+const LS_KEY='bearFamilyTree.v10';
 const COUNTRIES=[['MY','Malaysia'],['SG','Singapore'],['AU','Australia'],['GB','United Kingdom'],
  ['US','United States'],['ID','Indonesia'],['BN','Brunei'],['NZ','New Zealand'],['CA','Canada'],
  ['AE','UAE'],['SA','Saudi Arabia'],['JP','Japan'],['KR','South Korea'],['CN','China'],['HK','Hong Kong'],
@@ -292,7 +302,8 @@ function seed(){
     P('mia','Mia Aina','f',2019,'MY',null),     // Kak Ina's daughter — auto-visible niece
     P('lina','Lina Osman','f',1987,'MY',null),  // Farid's wife — cousins' partners show too
     P('zara','Zara Yusuf','f',1990,'GB',null),  // Mak Ngah's daughter
-    P('emma','Emma Lee','f',1997,'SG',null)     // Danish's girlfriend — dating ∕∕ demo
+    P('emma','Emma Lee','f',1997,'SG',null),    // Danish's girlfriend — dating ∕∕ demo
+    P('maklong','?','f','','',null)             // Pak Long's wife, name not known yet — a placeholder
   ].forEach(p=>persons[p.id]=p);
   const rel=(k,a,b)=>({kind:k,a,b});
   const rels=[
@@ -311,6 +322,7 @@ function seed(){
     rel('pc','aizat','alya'),rel('pc','sarah','alya'),
     rel('pc','aizat','aisha'),rel('pc','sarah','aisha'),
     rel('pc','paklong','farid'),rel('pc','paklong','dina'),
+    rel('pt','paklong','maklong'),rel('pc','maklong','farid'),rel('pc','maklong','dina'),
     {kind:'pt',a:'kamal',b:'ros',status:'divorced',ended:'2010'},
     rel('pc','kamal','hafiz'),rel('pc','ros','hafiz'),
     rel('pt','kamal','aminah'),
@@ -517,7 +529,35 @@ function nickFor(pid){ return (S.nicknames[viewing()]||{})[pid]||''; }
 function displayName(pid){ return nickFor(pid)||goesBy(pid); }
 // the name someone chose for themselves ("You go by"), else their first name
 function goesBy(pid){ const per=person(pid);
-  return (S.nicknames[pid]||{})[pid]||(per?per.name.split(' ')[0]:'?'); }
+  return (S.nicknames[pid]||{})[pid]||(per?(isPlaceholder(pid)?placeholderLabel(pid):per.name.split(' ')[0]):'?'); }
+// "?" placeholders: someone added before their name is known — usually a married-in
+// spouse, so the children can hang under the couple. Same rule as the database's
+// name_unknown mark: "?", "??", "unknown" (any case) or empty
+const UNKNOWN_NAME=/^\s*(\?*|unknown)\s*$/i;
+const isPlaceholder=pid=>!!person(pid)&&UNKNOWN_NAME.test(person(pid).name);
+// shown instead of "?": "Pak Long's wife" — the partner in MY words, so per-viewer
+// nicknames apply — or "Name not known yet" when there's no partner to go by
+const NO_NAME='Name not known yet';
+function placeholderLabel(pid){
+  const pts=partnersOf(pid).filter(x=>!isPlaceholder(x));
+  const pt=pts.find(x=>isCurrent(relStatus(pid,x)))||pts[0];
+  if(!pt)return NO_NAME;
+  const st=relStatus(pid,pt), g=person(pid).gender;
+  const word=st==='dating'?({f:'girlfriend',m:'boyfriend'}[g]||'partner')
+    :(isCurrent(st)?'':'ex-')+({f:'wife',m:'husband'}[g]||'partner');
+  return (S.session?displayName(pt):goesBy(pt))+"'s "+word; } // no session yet: "Who are you?"
+// a person's full name — a placeholder's label, never a bare "?"
+const fullName=pid=>isPlaceholder(pid)?placeholderLabel(pid):person(pid).name;
+// no partner to name them by: where they hang, so two "Name not known yet"s can be told apart
+function whereOf(pid){ const par=parentsOf(pid), kids=childrenOf(pid);
+  return par.length?'child of '+par.map(displayName).join(' & ')
+    :kids.length?'parent of '+kids.slice(0,2).map(displayName).join(', ')+(kids.length>2?'…':'')
+    :'not linked to anyone yet'; }
+// the small line under the big name: the full name — for a placeholder, the label (when a
+// nickname is shown big), else "name not known yet", or where they hang when that's the label
+function subName(pid){ if(!isPlaceholder(pid))return person(pid).name;
+  const l=placeholderLabel(pid); if(displayName(pid)!==l)return l;
+  return l===NO_NAME?whereOf(pid):'name not known yet'; }
 function refreshViewingBtn(){ const b=document.getElementById('viewingBtn');
   if(b&&S.session&&person(viewing()))b.textContent='viewing as '+goesBy(viewing()); }
 // "only us": a private nickname is shown only to the person who set it and the
@@ -871,16 +911,16 @@ function rebuild(origin){
   const seen=new Set();
   for(const pid of vis){ const p=pos[pid]; if(!p)continue; seen.add(pid);
     const per=person(pid); const isYou=pid===viewing();
-    const passed=!!per.passed;
-    const nick=displayName(pid);
+    const passed=!!per.passed, unknown=isPlaceholder(pid);
+    const nick=displayName(pid), two=unknown&&nick===NO_NAME; // too long for one line on a node
     let inner=`<button class="addfab" data-add="${pid}" title="add relative">＋</button>
-      <div class="avatar">${faceHtml(per)}
+      <div class="avatar${unknown?' unknown':''}">${faceHtml(per)}
         ${(!passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>
-      <div class="nick">${esc(nick)}${isPrivNick(viewing(),pid)?'<span class="lock" title="only us">🔒</span>':''}</div><div class="full">${esc(per.name)}</div>
+      <div class="nick${two?' two':''}">${esc(nick)}${isPrivNick(viewing(),pid)?'<span class="lock" title="only us">🔒</span>':''}</div><div class="full">${esc(subName(pid))}</div>
       ${passed?`<div class="passedon">${esc(memorialLine(per))}</div>`:''}
       ${isYou?'<span class="youchip">you</span>':''}`;
     // chips live inside the node so they travel with it
-    const chipBase=(passed?116:104)+(isYou?26:0);
+    const chipBase=(passed?116:104)+(isYou?26:0)+(two?16:0);
     const chips=[];
     const sideKey='side:'+pid, famKey='family:'+pid;
     const sideHidden=[...parentsOf(pid),
@@ -899,7 +939,7 @@ function rebuild(origin){
       chips.push({t:`⊕ family · ${n}`,cls:'ghost',act:()=>addExpansion('family',pid)}); }
     chips.forEach((c,i)=>{ inner+=`<button class="xchip ${c.cls}" data-chip="${pid}:${i}" style="left:50%;top:${chipBase+i*30}px;">${c.t}</button>`;
       pendingChips[pid+':'+i]=c.act; });
-    const cls=`node${isYou?' you':''}${passed?' passed':''}${!passed&&marriedInExOnly(pid,vis)?' exdim':''}`;
+    const cls=`node${isYou?' you':''}${passed?' passed':''}${!passed&&marriedInExOnly(pid,vis)?' exdim':''}${unknown?' unknown':''}`;
     let el=nodeEls.get(pid);
     if(!el){ // clear any retreating ghost of the same person first
       nodesEl.querySelectorAll(`.node.spawn[data-pid="${pid}"]`).forEach(g=>g.remove());
@@ -928,7 +968,8 @@ function esc(s){ return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&
 // a person's face: their photo if it's one the app made, else their initials — both made page-safe
 function faceHtml(per){ const photo=per.photos[per.mainPhoto]||per.photos.a||per.photos.t||per.photos.k;
   if(okPhoto(photo))return `<img src="${esc(photo)}" alt="">`;
-  return esc(per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase()); }
+  return esc(initials(per)); }
+const initials=per=>UNKNOWN_NAME.test(per.name)?'?':per.name.split(' ').map(w=>w[0]).slice(0,2).join('').toUpperCase();
 nodesEl.addEventListener('click',e=>{
   const add=e.target.closest('.addfab');
   if(add){ openAdd(add.dataset.add); return; }
@@ -1091,8 +1132,10 @@ function openHelp(){
 const SLOT_LABELS={k:'young kid',t:'teen · young adult',a:'adult'};
 function avatarHtml(per,size){
   const st=per.passed?'filter:grayscale(1);opacity:.85;':'';
-  return `<div class="avatar" style="${st}">${faceHtml(per)}
+  return `<div class="avatar${UNKNOWN_NAME.test(per.name)?' unknown':''}" style="${st}">${faceHtml(per)}
     ${(!per.passed&&per.country)?`<span class="flagpip">${flagEmoji(per.country)}</span>`:''}</div>`; }
+// a name in a card's list — a placeholder shows its label, looking like a gap to fill
+const nameSpan=pid=>`<span class="nickname${isPlaceholder(pid)?' unknownname':''}">${esc(fullName(pid))}</span>`;
 function partnersCardHtml(pid){
   const prels=S.rels.filter(r=>r.kind==='pt'&&(r.a===pid||r.b===pid));
   if(!prels.length)return '';
@@ -1111,7 +1154,7 @@ function partnersCardHtml(pid){
         <button class="link" onclick="unlinkPartner('${pid}','${other}')">unlink</button>`
       :esc(st+(r.ended?' · '+r.ended:''));
     return `<div class="nickrow" style="align-items:center;">
-      <span class="nickname">${esc(person(other).name)}</span>
+      ${nameSpan(other)}
       <span class="who" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">${ctrl}</span></div>`;
   }).join('');
   return `<div class="card"><div class="label">Partners</div>${rows}
@@ -1124,9 +1167,9 @@ function childrenCardHtml(pid){
   if(!kids.length&&!unlinked.length)return '';
   const canRel=canEditPerson(pid);
   const rows=[
-    ...kids.map(c=>`<div class="nickrow"><span class="nickname">${esc(person(c).name)}</span>
+    ...kids.map(c=>`<div class="nickrow">${nameSpan(c)}
       <span class="who">${esc(displayName(c))}</span></div>`),
-    ...unlinked.map(c=>`<div class="nickrow"><span class="nickname">${esc(person(c).name)}</span>
+    ...unlinked.map(c=>`<div class="nickrow">${nameSpan(c)}
       <span class="who">${canRel
         ?`not linked · <button class="link" onclick="linkChild('${pid}','${c}')">link as ${esc(displayName(pid))}'s child</button>`
         :'not linked to '+esc(displayName(pid))}</span></div>`)
@@ -1138,7 +1181,7 @@ function undone(pid){ save(); rebuild(); if(pid)refreshSheet(pid); }
 window.linkChild=async(parent,child)=>{
   const r={kind:'pc',a:parent,b:child};
   S.rels.push(r);
-  save(); rebuild(); openPerson(parent); toast('linked — '+person(child).name);
+  save(); rebuild(); openPerson(parent); toast('linked — '+fullName(child));
   if(!await db.insertRel(r)){ S.rels=S.rels.filter(x=>x!==r); undone(parent); } };
 function restoreRel(r,was){ r.status=was.status; if(was.ended===undefined)delete r.ended; else r.ended=was.ended; }
 window.setPStatus=async(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
@@ -1151,7 +1194,7 @@ window.setPEnded=async(a,b,v)=>{ const r=partnerRelOf(a,b); if(!r)return;
   r.ended=v.trim(); save(); rebuild();
   if(!await db.updateRel(r)){ restoreRel(r,was); undone(a); } };
 window.unlinkPartner=async(a,b)=>{
-  if(!confirm('Remove the partner link between '+person(a).name+' and '+person(b).name+'?\n\nBoth people stay in the tree — only the link is removed. Children keep both parents.'))return;
+  if(!confirm('Remove the partner link between '+fullName(a)+' and '+fullName(b)+'?\n\nBoth people stay in the tree — only the link is removed. Children keep both parents.'))return;
   const pair=r=>r.kind==='pt'&&((r.a===a&&r.b===b)||(r.a===b&&r.b===a));
   const gone=S.rels.filter(pair); S.rels=S.rels.filter(r=>!pair(r));
   save(); rebuild(); openPerson(a); toast('partner link removed');
@@ -1181,12 +1224,16 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     ?`only you can see this for now — and ${esc(theirs)}, once they join the tree`
     :per.claimedBy===S.session.nucleusId?`only you and ${esc(theirs)} can see this`
     :`only you and ${esc(theirs)}'s household can see this`;
-  const facts=[relationLabel(pid), per.born?('b. '+per.born):null,
+  // a placeholder: whoever can edit is asked for the name; everyone else sees the label
+  const unknown=isPlaceholder(pid), label=unknown?placeholderLabel(pid):'';
+  const facts=[editable&&unknown&&label!==NO_NAME?label:null,
+    relationLabel(pid), per.born?('b. '+per.born):null,
     per.passed?null:(per.country?('lives in '+ (COUNTRIES.find(c=>c[0]===per.country)?.[1]||per.country)+' '+flagEmoji(per.country)):null)]
     .filter(Boolean).join(' · ');
   openSheet(`
     <div class="profile">${avatarHtml(per)}
-      <div><h3>${esc(per.name)}</h3>
+      <div><h3>${!unknown?esc(per.name):!editable?`<span class="unknownname">${esc(label)}</span>`
+        :`<span class="unknownname">Name not known yet</span> — <button class="link" id="addname" onclick="focusName()" style="font-size:inherit;line-height:inherit;">add their name</button>`}</h3>
         <div class="cap2">${esc(facts)}</div>
         ${per.passed?`<div class="cap2">${esc(memorialLine(per))}</div>`:''}
         <div class="cap2" style="color:var(--primary);">${claimedLabel}</div></div></div>
@@ -1205,7 +1252,9 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
       <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div>
       <div class="cap2" style="margin-top:8px;">the starred photo is the face shown on the tree</div></div>
     ${editable?'':`<div class="viewonly">view only — ${per.claimedBy?'claimed by '+esc(S.nuclei[per.claimedBy]?.label||'another nucleus'):'more than 5 branches away ('+(dist===Infinity?'not connected':dist+' branches')+')'}</div>`}
-    <div class="fld"><span class="flabel">Full name</span><input id="f_name" value="${esc(per.name)}" ${editable?'':'disabled'}></div>
+    <div class="fld"><span class="flabel">Full name</span>${unknown
+      ?`<input id="f_name" value="" placeholder="not known yet — type it here" ${editable?'':'disabled'}>`
+      :`<input id="f_name" value="${esc(per.name)}" ${editable?'':'disabled'}>`}</div>
     <div style="display:flex;gap:10px;">
       <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="f_born" value="${esc(per.born)}" placeholder="year" ${editable?'':'disabled'}></div>
       <div class="fld" style="flex:2;"><span class="flabel">Living in</span>
@@ -1310,30 +1359,31 @@ function syncOpenNick(){ const box=document.getElementById('mynick_priv');
   if(sheet.contains(document.activeElement))return; // don't redraw under someone typing
   if(box.checked!==isPrivNick(viewing(),sheetPid))openPerson(sheetPid); }
 window.deletePersonUI=async(pid)=>{ const per=person(pid); if(!per||pid===viewing())return;
-  if(!confirm(`Remove ${per.name} from the tree?\n\nTheir links to everyone disappear too — photos and details go with them. Children they have keep their other parent.`))return;
+  const nm=fullName(pid);
+  if(!confirm(`Remove ${nm} from the tree?\n\nTheir links to everyone disappear too — photos and details go with them. Children they have keep their other parent.`))return;
   const links=S.rels.filter(r=>r.a===pid||r.b===pid), nicks={}, own=S.nicknames[pid];
   for(const v in S.nicknames)if(pid in S.nicknames[v])nicks[v]=S.nicknames[v][pid];
   delete S.persons[pid];
   S.rels=S.rels.filter(r=>r.a!==pid&&r.b!==pid);
   for(const v in S.nicknames)delete S.nicknames[v][pid];
   delete S.nicknames[pid];
-  save(); closeSheet(); rebuild(); toast('removed — '+per.name);
+  save(); closeSheet(); rebuild(); toast('removed — '+nm);
   if(!await db.deletePerson(pid)){ S.persons[pid]=per; S.rels.push(...links);
     if(own)S.nicknames[pid]=own;
     for(const v in nicks)(S.nicknames[v]=S.nicknames[v]||{})[pid]=nicks[v];
     undone(); } };
 // claiming locks a profile to one household, so say so before it happens
 const claimOk=name=>confirm(`Is ${name} you, or someone in your household?\n\nAfter you claim them, only your household can change their details. A tree keeper (⭐) can undo this later.`);
-window.claimPerson=async(pid)=>{ if(!claimOk(person(pid).name))return;
+window.claimPerson=async(pid)=>{ if(!claimOk(fullName(pid)))return;
   const was=person(pid).claimedBy; person(pid).claimedBy=S.session.nucleusId;
   save(); openPerson(pid); toast('claimed into your nucleus');
   if(!await db.claim(pid)){ person(pid).claimedBy=was; undone(pid); } };
 // tree keepers only: the profile goes back to unverified and can be claimed again (the database keeps a record)
 window.releaseClaimUI=async(pid)=>{ const per=person(pid); if(!per||!per.claimedBy||!isSuper())return;
   const house=S.nuclei[per.claimedBy]?.label||'their household';
-  if(!confirm(`Release ${per.name} from ${house}?\n\nThe profile goes back to unverified: family nearby can edit it again, and the right person can claim it. ${house} keeps its login. This is recorded.`))return;
+  if(!confirm(`Release ${fullName(pid)} from ${house}?\n\nThe profile goes back to unverified: family nearby can edit it again, and the right person can claim it. ${house} keeps its login. This is recorded.`))return;
   const was=per.claimedBy; per.claimedBy=null;
-  save(); rebuild(); openPerson(pid); toast('claim released — '+per.name);
+  save(); rebuild(); openPerson(pid); toast('claim released — '+fullName(pid));
   if(!await db.releaseClaim(pid)){ per.claimedBy=was; undone(pid); } };
 // tree keepers only: nothing is emailed, so a forgotten password comes back this way —
 // a one-time code for that household's login, which they type on the sign-in screen
@@ -1363,12 +1413,14 @@ function bornOk(b){ if(!b||BORN_RE.test(b))return true;
 window.savePerson=async(pid)=>{ const per=person(pid);
   const editable=canEditPerson(pid), memEditable=canEditMemorial(pid);
   const val=id=>document.getElementById(id).value;
-  if(editable){ if(!val('f_name').trim()){toast('name is needed');return;}
+  // a placeholder's name box starts empty: leaving it empty keeps them as "?"
+  const name=val('f_name').trim()||(isPlaceholder(pid)?per.name:'');
+  if(editable){ if(!name){toast('name is needed');return;}
     if(!bornOk(val('f_born').trim()))return; }
   const d=memEditable?val('f_passed').trim().toLowerCase():'';
   if(d&&d!=='unknown'&&!BORN_RE.test(d)){toast('date should be YYYY or YYYY-MM-DD');return;}
   const was=JSON.parse(JSON.stringify(per)), hadMemorial=!!per.passed;
-  if(editable){ per.name=val('f_name').trim(); per.born=val('f_born').trim();
+  if(editable){ per.name=name; per.born=val('f_born').trim();
     per.country=val('f_country');
     per.gender=val('f_gender');
     per.couplePos=val('f_cpos');
@@ -1379,7 +1431,7 @@ window.savePerson=async(pid)=>{ const per=person(pid);
     else if(d){ per.passed={date:d,styleId,custom}; }
     else if(per.passed&&!per.passed.date){ /* keep passed-no-date if it was set */ }
     else per.passed=null; }
-  save(); rebuild(); closeSheet(); toast('saved — '+per.name);
+  save(); rebuild(); closeSheet(); toast('saved — '+fullName(pid));
   const okP=!editable||await db.savePerson(per);
   const okM=!memEditable||await db.saveMemorial(per,hadMemorial);
   if(!okP){ const passed=per.passed; Object.assign(per,was); per.passed=passed; }
@@ -1436,7 +1488,7 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
     else if(rel==='childsolo')newRels.push({kind:'pc',a:anchor,b:id});
     else if(rel==='sibling')parentsOf(anchor).forEach(p=>newRels.push({kind:'pc',a:p,b:id}));
     newRels.forEach(r=>S.rels.push(r));
-    save(); rebuild(); closeSheet(); toast('added — '+name+' (unverified)');
+    save(); rebuild(); closeSheet(); toast('added — '+fullName(id)+' (unverified)');
     (async()=>{ if(!await db.insertPerson(S.persons[id])){
         delete S.persons[id]; S.rels=S.rels.filter(r=>!newRels.includes(r)); undone(); return; }
       for(const r of newRels) if(!await db.insertRel(r)){ S.rels=S.rels.filter(x=>x!==r); undone(); } })(); };
@@ -1459,7 +1511,7 @@ function openSelf(){ const per=person(viewing());
   const editable=canEditPerson(viewing());
   openSheet(`
     <div class="profile">${avatarHtml(per)}
-      <div><h3>${esc(per.name)}</h3><div class="cap2">that's you 🐻</div></div></div>
+      <div><h3>${esc(fullName(viewing()))}</h3><div class="cap2">that's you 🐻</div></div></div>
     <div class="card"><div class="label">You go by</div>
       <div class="bignick"><input id="mynick" value="${esc(nickFor(viewing()))}" placeholder="${esc(per.name.split(' ')[0])}">
         <button class="link" onclick="saveNick('${viewing()}')">save</button></div>
@@ -1471,7 +1523,7 @@ function openSelf(){ const per=person(viewing());
       <div class="nickrow"><span class="nickname">${esc(members)}</span><span class="who">shared login · always in view</span></div>
       <div class="nickrow"><span class="nickname" style="color:var(--primary);" id="tn_show">${esc(nuc.treeName)}</span>
         <button class="link" onclick="renameTree()">✎ rename</button></div>
-      ${isSuper()?`<div class="nickrow"><span class="nickname">Super settings</span>
+      ${isSuper()||MODE==='demo'?`<div class="nickrow"><span class="nickname">Super settings</span>
         <button class="link" onclick="openAdmin()">⭐ open</button></div>`:''}</div>
     ${MODE==='cloud'?`<div class="card"><div class="nickrow"><span class="nickname">Invite a friend to start their own tree</span>
       <button class="link" onclick="inviteFriend()">✉ share</button></div></div>`:''}
@@ -1560,8 +1612,31 @@ window.makeSuper=async(nid,flag)=>{
   const {error}=await sb.rpc('set_super',{target:nid,flag});
   if(error){ toast((error.message||'failed').toLowerCase()); return; }
   S.nuclei[nid].isSuper=flag; openAdmin(); toast(flag?'made super user ⭐':'super user removed'); };
-window.openAdmin=async()=>{ if(!isSuper())return;
+// keepers' list: everyone still called "?", the ones with the most children first
+function namesToFillHtml(){
+  const ids=Object.keys(S.persons).filter(isPlaceholder)
+    .sort((a,b)=>childrenOf(b).length-childrenOf(a).length||fullName(a).localeCompare(fullName(b)));
+  const rows=ids.map(pid=>{ const n=childrenOf(pid).length;
+    return `<button class="choice" data-fill="${pid}"><span class="itile unknown">?</span>
+      <span><span class="unknownname">${esc(fullName(pid))}</span>
+        <span class="sub">${n?n+(n===1?' child':' children'):'no children'}${fullName(pid)===NO_NAME?' · '+esc(whereOf(pid)):''}</span></span></button>`; }).join('');
+  return `<div class="card"><div class="label">Names to fill in (${ids.length})</div>
+    ${rows||'<div class="cap2">every name is filled in 🐻</div>'}
+    <div class="cap2" style="margin-top:6px;">people added as "?" while their name isn't known — tap one to type it in. Their links and children stay just as they are.</div></div>`; }
+function wireNamesToFill(){ sheetbody.querySelectorAll('[data-fill]').forEach(b=>b.onclick=()=>fillName(b.dataset.fill)); }
+// from the keepers' list: show them on the tree, open their card, cursor in the name box
+window.fillName=pid=>{ revealPath(pid); centerOn(pid); openPerson(pid); focusName(); };
+window.focusName=()=>{ const f=document.getElementById('f_name'); if(!f||f.disabled)return;
+  f.focus({preventScroll:true}); f.scrollIntoView({block:'center'}); };
+window.openAdmin=async()=>{ if(!isSuper()){
+    // the demo has no keepers or invites to manage — just the names list, to try it
+    if(MODE==='demo'){ openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Super settings</h3>
+      ${namesToFillHtml()}
+      <p class="cap2" style="text-align:center;">demo — on the real tree, only tree keepers (⭐) see this, along with super users and invites</p>`);
+      wireNamesToFill(); }
+    return; }
   openSheet(`<h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">⭐ Super settings</h3>
+    ${namesToFillHtml()}
     <div class="card"><div class="label">Super users · up to 3</div>
       ${Object.values(S.nuclei).map(n=>`<div class="nickrow"><span class="nickname">${esc(n.label)}</span>
         <span class="who">${n.isSuper
@@ -1573,6 +1648,7 @@ window.openAdmin=async()=>{ if(!isSuper())return;
         <button class="link" onclick="makeInvite()">✉ create</button></div>
       <div id="adm_pending" class="cap2" style="margin-top:4px;">loading pending invites…</div>
       <div class="cap2" style="margin-top:6px;">personal claim-invites live on each unclaimed person's profile (✉ invite … to claim)</div></div>`);
+  wireNamesToFill();
   try{
     const {data,error}=await sb.from('tree_invite').select('*').order('expires_at',{ascending:false});
     const box=document.getElementById('adm_pending'); if(!box)return;
@@ -1607,11 +1683,12 @@ document.getElementById('renameBtn').onclick=()=>renameTree();
 const searchEl=document.getElementById('search'), resultsEl=document.getElementById('results');
 searchEl.addEventListener('input',()=>{ const q=searchEl.value.trim().toLowerCase();
   if(!q){resultsEl.style.display='none';return;}
+  // a placeholder is found by its label ("Ali" finds "Ali's wife"), never by its "?"
   const hits=Object.values(S.persons).filter(p=>
-    p.name.toLowerCase().includes(q)||displayName(p.id).toLowerCase().includes(q)).slice(0,8);
+    fullName(p.id).toLowerCase().includes(q)||displayName(p.id).toLowerCase().includes(q)).slice(0,8);
   resultsEl.innerHTML=hits.map(p=>`<button data-pid="${p.id}">
-    <span class="rn">${esc(displayName(p.id))}${isPrivNick(viewing(),p.id)?' 🔒':''}</span>
-    <span class="rf">${esc(p.name)}</span></button>`).join('')||'<div class="cap2" style="padding:8px 12px;">no match</div>';
+    <span class="rn${isPlaceholder(p.id)?' unknownname':''}">${esc(displayName(p.id))}${isPrivNick(viewing(),p.id)?' 🔒':''}</span>
+    <span class="rf">${esc(subName(p.id))}</span></button>`).join('')||'<div class="cap2" style="padding:8px 12px;">no match</div>';
   resultsEl.style.display='block'; });
 resultsEl.addEventListener('click',e=>{ const b=e.target.closest('button'); if(!b)return;
   const pid=b.dataset.pid; resultsEl.style.display='none'; searchEl.value='';
@@ -1862,17 +1939,20 @@ function renderJoinInvited(code){
     if(data&&data.person_id)startSession(data.nucleus_id,data.person_id);
     else renderWhoAreYou(); }; }
 function renderWhoAreYou(){
-  const unclaimed=Object.values(S.persons).filter(p=>!p.claimedBy);
+  // someone still called "?" is shown as "Ali's wife", after everyone with a name
+  const unclaimed=Object.values(S.persons).filter(p=>!p.claimedBy)
+    .sort((a,b)=>isPlaceholder(a.id)-isPlaceholder(b.id));
   loginCard(`<h1>Who are you?</h1>
     <div class="cap">claim yourself if family already added you — or add yourself fresh</div>
     <div style="max-height:220px;overflow:auto;">
-      ${unclaimed.map(p=>`<button class="choice" data-claim="${p.id}"><span class="itile">${esc(p.name.split(' ').map(w=>w[0]).slice(0,2).join(''))}</span>
-        <span>${esc(p.name)}<span class="sub">${p.born?('b. '+esc(p.born)):'unclaimed'}</span></span></button>`).join('')||'<div class="cap">nobody unclaimed yet</div>'}
+      ${unclaimed.map(p=>{ const ph=isPlaceholder(p.id);
+        return `<button class="choice" data-claim="${p.id}"><span class="itile${ph?' unknown':''}">${esc(initials(p))}</span>
+        <span${ph?' class="unknownname"':''}>${esc(fullName(p.id))}<span class="sub">${ph?'name not known yet':p.born?('b. '+esc(p.born)):'unclaimed'}</span></span></button>`; }).join('')||'<div class="cap">nobody unclaimed yet</div>'}
     </div>
     <div class="fld" style="text-align:left;margin-top:10px;"><span class="flabel">or add yourself — full name</span><input id="wa_name"></div>
     <button class="btn primary" style="width:100%;" id="wa_new">Add me</button>`);
   document.querySelectorAll('[data-claim]').forEach(b=>b.onclick=async()=>{
-    const pid=b.dataset.claim; if(!claimOk(S.persons[pid].name))return;
+    const pid=b.dataset.claim; if(!claimOk(fullName(pid)))return;
     const {error}=await sb.rpc('claim_person',{p:pid});
     if(error){toast((error.message||'claim failed').toLowerCase());return;}
     S.persons[pid].claimedBy=ME.nucleusId; startSession(ME.nucleusId,pid); });
@@ -1886,8 +1966,8 @@ function renderWhoAreYou(){
 function pickProfile(nid,mems){ const el=document.getElementById('login');
   el.querySelector('.card').innerHTML=`<div class="bear">🐻</div>
     <h1>Who's looking?</h1><div class="cap">nicknames are personal — pick yourself</div>
-    ${mems.map(m=>`<button class="choice" data-p="${m}"><span class="itile">${esc(person(m).name.split(' ').map(w=>w[0]).slice(0,2).join(''))}</span>
-      <span>${esc(person(m).name)}</span></button>`).join('')}`;
+    ${mems.map(m=>`<button class="choice" data-p="${m}"><span class="itile">${esc(initials(person(m)))}</span>
+      <span>${esc(fullName(m))}</span></button>`).join('')}`;
   el.querySelectorAll('.choice').forEach(b=>b.onclick=()=>startSession(nid,b.dataset.p)); }
 function startSession(nid,pid){ S.session={nucleusId:nid,viewingAs:pid};
   S.history=[];S.active=[]; ensureDefaults(); save(); enterApp(); }

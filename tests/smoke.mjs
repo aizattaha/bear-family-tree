@@ -154,6 +154,109 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
   });
 }
 
+// ---------- "?" placeholders: Pak Long's wife, name not known yet (demo seed) ----------
+for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }],
+  ['phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+  await guard(`placeholder (${label})`, async () => {
+    const L = `placeholder (${label})`, phone = label === 'phone';
+    const { ctx, page, errors, supabase } = await demo(L, opts);
+    const tap = loc => phone ? loc.tap() : loc.click();
+    const open = loc => phone ? loc.tap() : loc.dblclick();
+    page.on('dialog', d => d.accept());
+    // search finds her by the label, never by "?"
+    await page.click('#search'); await page.keyboard.type('Long');
+    const hit = page.locator('#results button', { hasText: "Pak Long's wife" });
+    check(`${L}: search "Long" finds "Pak Long's wife · name not known yet"`, await hit.count() === 1
+      && (await hit.locator('.rf').textContent()) === 'name not known yet' && await hit.locator('.rn.unknownname').count() === 1);
+    if (phone) {
+      const box = await page.locator('#results').boundingBox();
+      check(`${L}: the results list fits the screen`, box && box.x >= 0 && box.x + box.width <= 375
+        && await page.evaluate(() => { const r = document.getElementById('results'); return r.scrollWidth <= r.clientWidth; }), box && `${Math.round(box.x)}–${Math.round(box.x + box.width)}`);
+    }
+    await page.fill('#search', '?');
+    check(`${L}: search "?" doesn't treat anyone as a person called "?"`, await page.locator('#results button').count() === 0);
+    await page.fill('#search', 'Long');
+    await tap(page.locator('#results button', { hasText: "Pak Long's wife" }));
+    check(`${L}: her card asks whoever can edit for the name`, await sheetOpen(page)
+      && (await page.textContent('#sheetbody h3')).replace(/\s+/g, ' ').trim() === 'Name not known yet — add their name'
+      && /Pak Long's wife/.test(await page.textContent('#sheetbody .profile')));
+    await tap(page.locator('#addname'));
+    check(`${L}: "add their name" puts the cursor in the name box`, await page.evaluate(() => document.activeElement.id) === 'f_name');
+    await closeSheet(page);
+    // on the tree: the label, as a dashed gap — not the memorial grey, not the faded ex
+    const look = await page.evaluate(() => { const n = document.querySelector('.node[data-pid="maklong"]'), a = n.querySelector('.avatar'),
+      d = document.querySelector('.node[data-pid="tokwan"] .avatar'), s = getComputedStyle(a);
+      return { cls: n.className, nick: n.querySelector('.nick').textContent, full: n.querySelector('.full').textContent, face: a.textContent.trim(),
+        border: s.borderTopStyle, filter: s.filter, opacity: getComputedStyle(n).opacity, italic: getComputedStyle(n.querySelector('.nick')).fontStyle,
+        deadBorder: d && getComputedStyle(d).borderTopStyle, deadFilter: d && getComputedStyle(d).filter }; });
+    check(`${L}: the tree shows "Pak Long's wife · name not known yet", not "?"`, look.nick === "Pak Long's wife" && look.full === 'name not known yet', `${look.nick} / ${look.full}`);
+    check(`${L}: drawn as a dashed "?" gap, unlike a memorial (grey) or a married-in ex (faded)`,
+      / unknown/.test(look.cls) && !/passed|exdim/.test(look.cls) && look.face === '?' && look.border === 'dashed' && look.filter === 'none'
+      && look.opacity === '1' && look.italic === 'italic' && look.deadBorder !== 'dashed' && /grayscale/.test(look.deadFilter || ''), JSON.stringify(look));
+    // keepers' list: own card → Super settings → Names to fill in
+    const ownCard = async () => { await page.click('#homeBtn'); await open(page.locator('.node[data-pid="aizat"] .avatar'));
+      await sheetOpen(page); await tap(page.locator('#sheetbody button:has-text("⭐ open")')); };
+    await ownCard();
+    const row = page.locator('#sheetbody [data-fill="maklong"]');
+    check(`${L}: Super settings lists "Names to fill in (1)" — her label and 2 children`,
+      /Names to fill in \(1\)/i.test(await page.textContent('#sheetbody')) && /Pak Long's wife/.test(await row.textContent()) && /2 children/.test(await row.textContent()));
+    await tap(row);
+    check(`${L}: tapping her opens her card with the cursor in the name box`,
+      await page.evaluate(() => sheetPid === 'maklong' && document.activeElement.id === 'f_name'));
+    await page.keyboard.type('Rosnah Ali');
+    await tap(page.locator('#sheetbody button.btn.primary:has-text("Save")'));
+    const after = await page.evaluate(() => ({ name: S.persons.maklong.name, ph: isPlaceholder('maklong'),
+      cls: document.querySelector('.node[data-pid="maklong"]').className, nick: document.querySelector('.node[data-pid="maklong"] .nick').textContent }));
+    check(`${L}: saving a name clears the mark — a normal person again`, after.name === 'Rosnah Ali' && !after.ph && !/unknown/.test(after.cls) && after.nick === 'Rosnah', JSON.stringify(after));
+    await page.waitForFunction(() => !document.getElementById('sheet').classList.contains('open'));
+    await ownCard();
+    check(`${L}: …and the list is down to "Names to fill in (0)"`, /Names to fill in \(0\)/i.test(await page.textContent('#sheetbody')));
+    await closeSheet(page);
+    // Aizat's way of working still works: typing "?" makes a placeholder again
+    await page.evaluate(() => openPerson('maklong')); await sheetOpen(page);
+    await page.fill('#f_name', '?');
+    await tap(page.locator('#sheetbody button.btn.primary:has-text("Save")'));
+    check(`${L}: typing "?" as the name marks them again`, await page.evaluate(() => isPlaceholder('maklong')
+      && / unknown/.test(document.querySelector('.node[data-pid="maklong"]').className)));
+    if (!phone) {
+      // a placeholder's card saved with the name box left empty stays "?" (other details still save)
+      await page.waitForFunction(() => !document.getElementById('sheet').classList.contains('open'));
+      await page.evaluate(() => openPerson('maklong')); await sheetOpen(page);
+      await page.fill('#f_born', '1952');
+      await page.click('#sheetbody button.btn.primary:has-text("Save")');
+      check(`${L}: an empty name box keeps them "?" and still saves the rest`, await page.evaluate(() => S.persons.maklong.name === '?' && S.persons.maklong.born === '1952'));
+      // someone who can't edit her (Baba, 6 branches away) just sees the label, in their own words
+      const other = await page.evaluate(() => { const keep = S.session; S.session = { nucleusId: 'n4', viewingAs: 'baba' };
+        openPerson('maklong'); const r = { h3: document.querySelector('#sheetbody h3').textContent, ask: !!document.getElementById('addname') };
+        S.session = keep; return r; });
+      check(`${L}: someone who can't edit her sees "Zulkifli's wife", no prompt`, other.h3 === "Zulkifli's wife" && !other.ask, JSON.stringify(other));
+      await sheetOpen(page); await closeSheet(page);
+      // "Who are you?" (sign-up): listed by her label, after everyone with a name
+      const who = await page.evaluate(() => { const keep = S.session; S.session = null; renderWhoAreYou();
+        const rows = [...document.querySelectorAll('[data-claim]')].map(b => ({ id: b.dataset.claim, t: b.textContent.replace(/\s+/g, ' ').trim() }));
+        S.session = keep; enterApp(); return rows; });
+      const last = who[who.length - 1] || {};
+      check(`${L}: "Who are you?" lists her as "Zulkifli's wife · name not known yet", last — never as "?"`,
+        last.id === 'maklong' && /Zulkifli's wife/.test(last.t) && /name not known yet/.test(last.t) && !who.some(r => /^\? \?/.test(r.t)), last.t);
+      // adding someone as "?" the usual way: Kak Ina's husband
+      await page.waitForTimeout(300);
+      if (await page.isVisible('#showall')) await page.click('#showall'); // back to my view: Kak Ina beside me
+      await page.waitForTimeout(700);
+      await page.locator('.node[data-pid="ina"] .avatar').dblclick(); await sheetOpen(page);
+      await page.click('#sheetbody button:has-text("Add relative")');
+      await page.fill('#a_name', '?'); await page.selectOption('#a_gender', 'm');
+      await page.click('.choice[data-rel="partner"]'); await page.click('#a_save');
+      const added = await page.evaluate(() => { const id = partnersOf('ina')[0];
+        return { label: fullName(id), toast: document.getElementById('toast').textContent, cls: document.querySelector(`.node[data-pid="${id}"]`)?.className }; });
+      check(`${L}: adding "?" as Kak Ina's partner shows "Kak Ina's husband"`, added.label === "Kak Ina's husband"
+        && /added — Kak Ina's husband/.test(added.toast) && / unknown/.test(added.cls || ''), JSON.stringify(added));
+    }
+    check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
+    check(`${L}: the demo never contacted Supabase`, supabase.length === 0, supabase.join(' | '));
+    await ctx.close();
+  });
+}
+
 await browser.close(); server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
