@@ -8,6 +8,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import jsQR from 'jsqr';
 
 const APP = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'app');
 const server = createServer(async (req, res) => {
@@ -264,6 +265,124 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await ctx.close();
   });
 }
+
+// ---------- invite sheets: a QR code to scan, WhatsApp instead of email ----------
+// Keepers' sheets are cloud-only, so the page gets made-up database answers here
+// (nothing reaches Supabase): the real code runs — drawing, countdown, refresh, polling.
+const APP_SRC = await readFile(path.join(APP, 'index.html'), 'utf8');
+const LIVE = 'https://aizattaha.github.io/bear-family-tree/';
+const noNumber = href => /^https:\/\/wa\.me\/\?text=/.test(href || '') && !/\d{6,}/.test(decodeURIComponent(href || ''));
+// read the QR code on screen the way a phone camera would
+const readQr = page => page.evaluate(async () => {
+  const xml = new XMLSerializer().serializeToString(document.querySelector('#qr_box svg'));
+  const img = new Image(); img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml); await img.decode();
+  const c = document.createElement('canvas'); c.width = c.height = 300; const g = c.getContext('2d'); g.drawImage(img, 0, 0, 300, 300);
+  return Array.from(g.getImageData(0, 0, 300, 300).data); }).then(px => jsQR(Uint8ClampedArray.from(px), 300, 300)?.data);
+for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }],
+  ['phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+  await guard(`invites (${label})`, async () => {
+    const L = `invites (${label})`, phone = label === 'phone';
+    const { ctx, page, errors } = await demo(L, opts);
+    const calls = [], codes = ['abcdefabcdef', 'fedcbafedcba', 'bbbbccccdddd'];
+    let made = 0, invite = () => [{ opened_at: null, expires_at: new Date(Date.now() + 3e5).toISOString() }], claimed = null;
+    await page.route(/supabase\.co/, r => { const q = r.request(), u = decodeURIComponent(q.url()); calls.push(`${q.method()} ${u.replace(/^.*\/v1\//, '')}`);
+      if (/rpc\/make_qr_invite/.test(u)) return r.fulfill({ json: { code: codes[made++ % 3], expires_at: new Date(Date.now() + 3e5).toISOString(), seconds: 300 } });
+      if (/tree_invite/.test(u) && q.method() === 'GET' && /select=opened_at/.test(u)) return r.fulfill({ json: invite() });
+      if (/tree_invite/.test(u) && q.method() === 'GET') return r.fulfill({ json: [] });
+      if (/tree_invite/.test(u) && q.method() === 'POST') return r.fulfill({ status: 201, json: [{ code: 'linklinklink', expires_at: new Date(Date.now() + 14 * 864e5).toISOString() }] });
+      if (/tree_invite/.test(u) && q.method() === 'DELETE') return r.fulfill({ json: [] });
+      if (/\/person\?/.test(u)) return r.fulfill({ json: [{ claimed_by: claimed }] });
+      r.abort(); });
+    const tap = sel => phone ? page.tap(sel) : page.click(sel);
+    // the card's button → a QR code for this person, counting down from 5 minutes
+    const pid = await page.evaluate(() => Object.keys(S.persons).find(id => !S.persons[id].claimedBy && !isPlaceholder(id)));
+    await page.evaluate(p => openPerson(p), pid);
+    await sheetOpen(page);
+    // what a keeper's card shows (the demo has no keepers): cloud mode just for drawing it
+    await page.evaluate(p => { const n = S.session.nucleusId, was = S.nuclei[n].isSuper;
+      S.nuclei[n].isSuper = true; ME.nucleusId = n; MODE = 'cloud'; openPerson(p); MODE = 'demo'; ME.nucleusId = null; S.nuclei[n].isSuper = was; }, pid);
+    check(`${L}: an unclaimed card has "✉ invite … to claim this profile" for a keeper`, await page.locator('#sheetbody button:has-text("to claim this profile")').count() === 1);
+    await page.evaluate(p => invitePerson(p), pid);
+    await page.waitForSelector('#qr_box svg', { timeout: 3000 });
+    check(`${L}: a QR code is drawn, and reads as the invite link for that code`, await readQr(page) === LIVE + '#invite=abcdefabcdef');
+    const t0 = await page.textContent('#qr_state'); await page.waitForTimeout(2100); const t1 = await page.textContent('#qr_state');
+    check(`${L}: it says how long it works — "works for 5:00 / 4:59" — and counts down`, /works for (5:00|4:5\d)/.test(t0) && /works for 4:5\d/.test(t1) && t0 !== t1, `${t0} → ${t1}`);
+    check(`${L}: …asking the database who opened it, every few seconds`, calls.some(c => /^GET tree_invite\?select=opened_at,expires_at&code=eq\.abcdefabcdef/.test(c)), calls.join(' | '));
+    check(`${L}: the refresh button waits until the code has run out`, !(await page.isVisible('#qr_new')));
+    if (phone) { const b = await page.locator('#qr_box').boundingBox();
+      check('invites (phone): the QR code is big and fits the screen', b && b.width >= 240 && b.x >= 0 && b.x + b.width <= 375, b && `${Math.round(b.width)}px at ${Math.round(b.x)}`); }
+    // 5 minutes later (the test moves the clock on): greyed out, refresh
+    await page.evaluate(() => { QR.end = Date.now(); });
+    await page.waitForSelector('#qr_box.dead', { timeout: 3000 });
+    check(`${L}: run out → greyed out, "run out", refresh shows`, /run out/.test(await page.textContent('#qr_state')) && await page.isVisible('#qr_new'));
+    await tap('#qr_new');
+    await page.waitForFunction(() => document.querySelector('#qr_box svg') && !document.querySelector('#qr_box.dead'), null, { timeout: 3000 });
+    check(`${L}: refresh makes a brand-new code (the database deletes the old one)`, made === 2 && await readQr(page) === LIVE + '#invite=fedcbafedcba' && !(await page.isVisible('#qr_new')));
+    // they scan it: the keeper's screen says so; then they take their place
+    invite = () => [{ opened_at: new Date().toISOString(), expires_at: new Date(Date.now() + 18e5).toISOString() }];
+    await page.waitForFunction(() => /scanned/.test(document.getElementById('qr_state').textContent), null, { timeout: 6000 }).catch(() => {});
+    check(`${L}: scanned → "✓ scanned — … has until … to finish", greyed so nobody else scans it`, /✓ scanned — .+ has until .+ to finish signing up/.test(await page.textContent('#qr_state'))
+      && await page.locator('#qr_box.dead').count() === 1 && await page.isVisible('#qr_cancel'), (await page.textContent('#qr_state')).replace(/\s+/g, ' '));
+    invite = () => []; claimed = 'n-someone';
+    await page.evaluate(() => qrCheck(QR));
+    check(`${L}: used → "🎉 … has taken their place on the tree", and no more link to send`, /🎉 .+ has taken their place on the tree/.test(await page.textContent('#qr_state'))
+      && await page.locator('#ln_card').count() === 0);
+    // closing the sheet deletes a code nobody scanned
+    invite = () => [{ opened_at: null, expires_at: new Date(Date.now() + 3e5).toISOString() }];
+    await page.evaluate(p => invitePerson(p), pid); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
+    await closeSheet(page); await page.waitForTimeout(300);
+    check(`${L}: closing the sheet deletes the unscanned code (never a scanned one)`, calls.some(c => /^DELETE tree_invite\?code=eq\.bbbbccccdddd&opened_at=is\.null/.test(c)), calls.filter(c => /DELETE/.test(c)).join(' | '));
+    // 💬 a 14-day link instead
+    await page.evaluate(p => invitePerson(p), pid); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
+    check(`${L}: the sheet says which is which: QR = with you now; link = 14 days`, /With you now\? Let them scan this/i.test(await page.textContent('#sheetbody'))
+      && /Not with you\? Send a link/i.test(await page.textContent('#sheetbody')) && /14 days/.test(await page.textContent('#ln_state')));
+    await tap('#ln_make'); await page.waitForSelector('#ln_wa', { timeout: 3000 });
+    const lwa = await page.getAttribute('#ln_wa', 'href');
+    check(`${L}: link → 💬 WhatsApp with the link in the message, no phone number`, noNumber(lwa) && decodeURIComponent(lwa).includes(LIVE + '#invite=linklinklink')
+      && await page.getAttribute('#ln_wa', 'target') === '_blank' && /noopener/.test(await page.getAttribute('#ln_wa', 'rel')), lwa);
+    check(`${L}: …plus "copy link", and "works once, until …"`, await page.locator('#ln_copy:has-text("copy link")').count() === 1 && /works once, until/.test(await page.textContent('#ln_state')));
+    check(`${L}: no "send by email" / mailto in the invite sheet`, !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')));
+    await closeSheet(page);
+    // ⭐ general code and "invite a friend"
+    await page.evaluate(() => inviteDialog('abcdefabcdef', new Date(Date.now() + 14 * 864e5))); await sheetOpen(page);
+    const gwa = await page.getAttribute('#inv_wa', 'href');
+    check(`${L}: general code → 💬 WhatsApp (link + code, no phone number) + copy link`, noNumber(gwa) && decodeURIComponent(gwa).includes(LIVE + '#invite=abcdefabcdef')
+      && decodeURIComponent(gwa).includes('invite code: abcdefabcdef') && await page.locator('#inv_copy:has-text("copy link")').count() === 1
+      && !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')), gwa);
+    await closeSheet(page);
+    await page.evaluate(() => inviteFriend()); await sheetOpen(page);
+    const fwa = await page.getAttribute('#fr_wa', 'href');
+    check(`${L}: invite a friend → 💬 WhatsApp (#newtree link, no phone number) + copy link`, noNumber(fwa) && decodeURIComponent(fwa).includes(LIVE + '#newtree')
+      && await page.locator('#fr_copy:has-text("copy link")').count() === 1 && !/mailto:|send by email/i.test(await page.innerHTML('#sheetbody')), fwa);
+    if (phone) { const h = await page.locator('#fr_wa').boundingBox();
+      check('invites (phone): the WhatsApp button is a full-size button', h && h.height >= 44, h && `${Math.round(h.height)}px`); }
+    await closeSheet(page);
+    check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  });
+}
+check('no "mailto:" left anywhere in the app', !/mailto:/i.test(APP_SRC));
+
+// ---------- the relative's side: a QR code / link opens the app ----------
+await guard('invite landing', async () => {
+  for (const [what, answer, want] of [
+    ['a QR code', { name: 'Kak Yana', kind: 'qr', expires_at: new Date(Date.now() + 18e5).toISOString(), seconds: 1800 }, /Kak Yana, you're invited.*please finish by .+ you have 30 minutes/s],
+    ['a 14-day link', { name: 'Kak Yana', kind: 'link', expires_at: new Date(Date.now() + 9 * 864e5).toISOString(), seconds: 9 * 86400 }, /^Kak Yana, you're invited to join Bear Family Tree! 🐻$/],
+    ['a code that ran out', null, /has run out or has already been used — ask the family for a fresh one/]]) {
+    const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true }), page = await ctx.newPage(), errors = [], opened = [];
+    page.on('pageerror', e => errors.push(e.message));
+    await page.route(/supabase\.co/, r => { const u = r.request().url();
+      if (/rpc\/open_invite/.test(u)) { opened.push(r.request().postData()); return r.fulfill({ json: answer }); }
+      r.abort(); });
+    await page.goto(BASE + '#invite=abcdefabcdef');
+    await page.waitForFunction(() => !/^you're invited/.test(document.getElementById('inv_banner')?.textContent || ''), null, { timeout: 3000 }).catch(() => {});
+    const banner = (await page.textContent('#inv_banner')).trim();
+    check(`landing (${what}): tells the database it was opened, once`, opened.length === 1 && /"invite_code":"abcdefabcdef"/.test(opened[0] || ''), opened.join(' | '));
+    check(`landing (${what}): straight to "create your account", with the right words`, await page.locator('#au_up').count() === 1 && want.test(banner), banner);
+    check(`landing (${what}): no errors in the page`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+});
 
 await browser.close(); server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

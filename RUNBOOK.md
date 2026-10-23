@@ -110,6 +110,36 @@ Good to know:
 - Forgotten which email their login uses? Supabase dashboard → project **bear-family-tree** →
   **Authentication** → **Users** lists every login's email.
 
+## 6. Invite a relative (QR code or WhatsApp — no emails)
+Only tree keepers (⭐) can invite. An invite is for one person who is already on the tree but
+has no login yet (their card says "unverified").
+
+**When they're with you (best):**
+1. Open their card (tap them on the tree, or type their name in search).
+2. Tap **✉ invite … to claim this profile**. A big QR code appears, with "works for 4:59".
+3. Hold your phone out. They open their phone's **Camera**, point it at the code and tap the
+   link that pops up.
+4. On their phone: **Create account** (their email + a password, at least 6 characters) →
+   name their household → **Take my place**. They're in, as themselves.
+5. Your screen shows "✓ scanned — … has until …", then "🎉 … has taken their place on the tree".
+
+Good to know:
+- The code must be **scanned within 5 minutes**. After that it greys out: tap **↻ refresh** for
+  a new one (the old one stops working).
+- Once scanned, they have **30 minutes** to finish signing up — no rush.
+- **Whoever scans it first gets the profile**, so only show it to the right person. If someone
+  else scanned it, tap **not …? cancel this code**, then refresh.
+- Closing the sheet deletes a code nobody scanned.
+
+**When they're far away:** on the same sheet, under **💬 Not with you? Send a link**, tap
+**make a 14-day link** → **💬 WhatsApp** and pick them (or **copy link** and paste it anywhere).
+The link works once, for 14 days. Send it only to them.
+
+**Anyone in the family (not a particular card):** ⭐ **Super settings** → **Invites** →
+**✉ create** → **💬 WhatsApp**. Whoever uses it then finds themselves on the tree and claims
+their place. ⭐ **Super settings** → **Invites** also lists every link that still works, with
+**delete**.
+
 ## Turning the Mac jobs off or on
 In Terminal (⌘ + Space, `Terminal`, Enter):
 ```bash

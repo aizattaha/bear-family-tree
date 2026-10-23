@@ -5,7 +5,8 @@
 //   3. launch gate (2026-10-23): kinship, remove_person, release_claim, timestamps
 //   4. keeper reset codes (2026-10-24): who may make one, redeeming, real sign-in after, limits
 //   5. placeholder names (2026-10-24): "?" people marked name_unknown, edit rules unchanged
-//   6. catalog: search_path + who may call which function, Finance leftovers gone
+//   6. QR invites (2026-10-24): 5 minutes to scan, then 30 to sign up; refresh; single use
+//   7. catalog: search_path + who may call which function, Finance leftovers gone
 // env: SUPABASE_URL, SUPABASE_KEY (publishable), DB_CONTAINER (the stack's db container)
 // usage: node permissions.mjs        (exit code 1 if anything fails)
 import { createClient } from '@supabase/supabase-js';
@@ -505,7 +506,126 @@ check('another tree still sees nothing', !r.error && r.data.length === 0, r.erro
 r = await anon.from('person').select('name_unknown').limit(1);
 check('signed-out visitors still read nothing', !!r.error || r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
 
-/* ============ 6. catalog: search_path + who may call what ============ */
+/* ============ 6. QR invites (2026-10-24): 5 minutes to scan, then 30 to sign up ============ */
+section = '[qr] ';
+{
+  // Q keeps the tree; M is a member (not a keeper); Y keeps another tree; J1–J3 are relatives joining
+  const Q = await user('qk'), M = await user('qm'), Y = await user('qy'), J1 = await user('qj1'), J2 = await user('qj2'), J3 = await user('qj3');
+  r = await Q.rpc('create_tree', { nucleus_label: 'Q house', tree_nm: 'Q tree' });
+  const tree = r.data, nucQ = await nucOf(Q);
+  const pQ = randomUUID(), pM = randomUUID(), p1 = randomUUID(), p2 = randomUUID(), p3 = randomUUID(), pGone = randomUUID();
+  r = await Q.from('person').insert([{ id: pQ, tree_id: tree, full_name: 'Test Keeper Q', claimed_by: nucQ },
+    { id: pM, tree_id: tree, full_name: 'Test Member' }, { id: p1, tree_id: tree, full_name: 'Test One' },
+    { id: p2, tree_id: tree, full_name: 'Test Two' }, { id: p3, tree_id: tree, full_name: 'Test Three' },
+    { id: pGone, tree_id: tree, full_name: 'Test Removed' }]);
+  check('setup: people added', !r.error, r.error?.message);
+  const linkM = await Q.from('tree_invite').insert({ tree_id: tree, person_id: pM }).select('code').single();
+  r = await M.rpc('join_with_invite', { invite_code: linkM.data.code, nucleus_label: 'M house', tree_nm: 'M tree' });
+  check('setup: M joins with a 14-day link (unchanged)', !r.error && r.data?.person_id === pM, r.error?.message);
+  await Y.rpc('create_tree', { nucleus_label: 'Y house', tree_nm: 'Y tree' });
+  await Q.rpc('remove_person', { p: pGone });
+  const make = (c, p, nm = 'Kak One') => c.rpc('make_qr_invite', { p, invite_nm: nm });
+  const open = (code, c = anon) => c.rpc('open_invite', { invite_code: code });
+  const row = code => sql(`select kind||'|'||(opened_at is not null)||'|'||round(extract(epoch from expires_at - now()))||'|'||coalesce(invite_name,'∅')||'|'||coalesce(created_by::text,'') from tree_invite where code='${code}'`).trim();
+  const qrsOf = p => sql(`select count(*) from tree_invite where person_id='${p}' and kind='qr'`).trim();
+  const near = (s, want) => Math.abs(Number(s) - want) <= 3;
+
+  // who may make one
+  const before = sql(`select count(*) from tree_invite where tree_id='${tree}'`).trim();
+  r = await make(M, p1);
+  check('a member who isn\'t a keeper cannot make a QR invite', !!r.error, r.error?.message || 'made one');
+  r = await make(anon, p1);
+  check('a signed-out visitor cannot make a QR invite', !!r.error, r.error?.message || 'made one');
+  r = await make(Y, p1);
+  check('a keeper of another tree cannot make one for this tree', !!r.error, r.error?.message || 'made one');
+  r = await make(Q, pQ);
+  check('nor for a profile already claimed', !!r.error && /already been claimed/.test(r.error.message), r.error?.message || 'made one');
+  r = await make(Q, pGone);
+  check('nor for someone removed from the tree', !!r.error, r.error?.message || 'made one');
+  check('…and none of those left an invite behind', sql(`select count(*) from tree_invite where tree_id='${tree}'`).trim() === before);
+  r = await Q.from('tree_invite').insert({ tree_id: tree, person_id: p1, kind: 'qr', expires_at: new Date(Date.now() + 864e5).toISOString() }).select('code');
+  check('a keeper can\'t write a QR invite into the table directly (only make_qr_invite sets its minutes)', !!r.error, r.error?.message || 'inserted');
+  r = await Q.from('tree_invite').insert({ tree_id: tree, person_id: p1, opened_at: new Date().toISOString() }).select('code');
+  check('…nor a link that claims to be opened already', !!r.error, r.error?.message || 'inserted');
+
+  // making one
+  r = await make(Q, p1, '  Kak One  ');
+  const c1 = r.data?.code, f1 = row(c1).split('|');
+  check('a keeper makes a QR invite: code + 300 seconds', !r.error && /^[0-9a-f]{12}$/.test(c1 || '') && r.data.seconds === 300, r.error?.message || JSON.stringify(r.data));
+  check('stored as kind qr, not opened, runs out in 5 minutes, name trimmed, made by the keeper',
+    f1[0] === 'qr' && f1[1] === 'false' && near(f1[2], 300) && f1[3] === 'Kak One' && f1[4] === Q.uid, row(c1));
+  r = await make(Q, p2, 'x'.repeat(200));
+  check('a long name is cut to 80 characters; an empty one is stored as none', !r.error && row(r.data.code).split('|')[3].length === 80
+    && (await make(Q, p2, '   ')).data && sql(`select count(*) from tree_invite where person_id='${p2}' and kind='qr' and invite_name is null`).trim() === '1');
+  r = await M.from('tree_invite').select('code').eq('code', c1);
+  check('a member can\'t read QR codes (only keepers read invites)', !r.error && r.data.length === 0, r.error?.message);
+
+  // refresh: a new code, the old one goes
+  r = await make(Q, p1);
+  const c1b = r.data?.code;
+  check('refresh: a brand-new code, and the old one is deleted', !r.error && c1b !== c1 && row(c1) === '' && qrsOf(p1) === '1', `${row(c1)} · ${qrsOf(p1)}`);
+  r = await open(c1);
+  check('…so the old code opens nothing', !r.error && r.data === null, r.error?.message || JSON.stringify(r.data));
+
+  // opening it (the relative's phone, signed out)
+  r = await open(c1b);
+  const f1b = row(c1b).split('|');
+  check('opening a QR code in time: its 30 minutes start (name, kind, ~1800 s)', !r.error && r.data?.name === 'Kak One' && r.data.kind === 'qr'
+    && near(r.data.seconds, 1800) && f1b[1] === 'true' && near(f1b[2], 1800), r.error?.message || JSON.stringify(r.data) + ' · ' + row(c1b));
+  sql(`update tree_invite set opened_at = opened_at - interval '10 minutes', expires_at = expires_at - interval '10 minutes' where code='${c1b}'`);
+  r = await open(c1b, J2);
+  check('opening it again (even signed in) does not add more time', !r.error && near(r.data?.seconds, 1200) && near(row(c1b).split('|')[2], 1200), JSON.stringify(r.data));
+  r = await Q.from('tree_invite').delete().eq('code', c1b).is('opened_at', null).select('code');
+  check('closing the keeper\'s sheet leaves a scanned code alone (they\'re signing up)', !r.error && r.data.length === 0 && row(c1b) !== '', r.error?.message);
+  r = await make(Q, p1);
+  const c1c = r.data?.code;
+  check('refresh after a scan keeps the scanned code too — first to finish takes the place', !r.error && row(c1b) !== '' && qrsOf(p1) === '2', qrsOf(p1));
+  r = await J1.rpc('join_with_invite', { invite_code: c1b, nucleus_label: 'J1 house', tree_nm: 'J1 tree' });
+  check('20 minutes after scanning: sign-up finishes and claims the right person', !r.error && r.data?.person_id === p1
+    && sql(`select claimed_by from person where id='${p1}'`).trim() === await nucOf(J1), r.error?.message);
+  check('…and that code is used up', row(c1b) === '' && (await open(c1b)).data === null);
+  r = await J3.rpc('join_with_invite', { invite_code: c1c, nucleus_label: 'J3 house', tree_nm: 'J3 tree' });
+  check('the other live code can\'t take the claimed profile', !!r.error && /already been claimed/.test(r.error.message), r.error?.message || 'joined');
+
+  // too slow
+  r = await make(Q, p2);
+  const c2 = r.data?.code;
+  sql(`update tree_invite set expires_at = now() - interval '1 second' where code='${c2}'`); // 5 minutes later, nobody scanned
+  r = await open(c2);
+  check('not scanned within 5 minutes: opening it gives nothing, and it stays shut', !r.error && r.data === null && row(c2).split('|')[1] === 'false'
+    && Number(row(c2).split('|')[2]) <= 0, r.error?.message || row(c2));
+  r = await J2.rpc('join_with_invite', { invite_code: c2, nucleus_label: 'J2 house', tree_nm: 'J2 tree' });
+  check('…and signing up with it is refused', !!r.error && /invalid or expired/.test(r.error.message) && !(await nucOf(J2)), r.error?.message || 'joined');
+  r = await make(Q, p3);
+  const c3 = r.data?.code;
+  check('the next QR code anyone makes sweeps away ones that ran out', !r.error && row(c2) === '', row(c2));
+  await open(c3);
+  sql(`update tree_invite set expires_at = now() - interval '1 second' where code='${c3}'`); // 30 minutes after the scan
+  r = await J2.rpc('join_with_invite', { invite_code: c3, nucleus_label: 'J2 house', tree_nm: 'J2 tree' });
+  check('scanned, but not finished within 30 minutes: refused', !!r.error && /invalid or expired/.test(r.error.message)
+    && sql(`select claimed_by is null from person where id='${p3}'`).trim() === 't', r.error?.message || 'joined');
+
+  // 14-day links: only read, never changed
+  const ln = await Q.from('tree_invite').insert({ tree_id: tree, person_id: p3, invite_name: 'Kak Three' }).select('code').single();
+  const stamp = code => sql(`select expires_at::text||'|'||coalesce(opened_at::text,'not opened') from tree_invite where code='${code}'`).trim();
+  const was = stamp(ln.data.code);
+  r = await open(ln.data.code);
+  check('opening a 14-day link greets them by name and changes nothing', !r.error && r.data?.name === 'Kak Three' && r.data.kind === 'link'
+    && near(r.data.seconds, 14 * 86400) && stamp(ln.data.code) === was, r.error?.message || `${was} → ${stamp(ln.data.code)}`);
+  r = await open('nope');
+  check('an unknown code: nothing', !r.error && r.data === null, r.error?.message);
+  r = await open(null);
+  check('no code at all: nothing', !r.error && r.data === null, r.error?.message);
+  r = await J2.rpc('join_with_invite', { invite_code: ln.data.code, nucleus_label: 'J2 house', tree_nm: 'J2 tree' });
+  check('the 14-day link still works as before', !r.error && r.data?.person_id === p3, r.error?.message);
+  r = await Q.rpc('make_qr_invite', { p: p3, invite_nm: 'x' });
+  check('no QR code for someone who just took their place', !!r.error, r.error?.message || 'made one');
+  const left = sql(`select count(*) from tree_invite where tree_id='${tree}' and kind='qr' and expires_at > now()`).trim();
+  r = await Q.from('tree_invite').delete().eq('code', c1c).select('code');
+  check('a keeper can delete a QR code (cancel it)', !r.error && r.data.length === 1 && left === '1', r.error?.message || left);
+}
+
+/* ============ 7. catalog: search_path + who may call what ============ */
 section = '[catalog] ';
 const rows = q => sql(q).trim().split('\n').filter(Boolean);
 // production's hand-made BearHaus Finance objects (stand-ins: tests/prod-finance-drift.sql) are removed by upgrade 8
@@ -519,20 +639,22 @@ const unpinned = rows(`select proname from pg_proc where pronamespace='public'::
 check('every SECURITY DEFINER function pins its search_path', unpinned.length === 0, unpinned.join(', '));
 const callable = role => rows(`select proname from pg_proc where pronamespace='public'::regnamespace
   and has_function_privilege('${role}', oid, 'execute') order by 1`).join(',');
-check('signed-out visitors (anon) can call only invite_preview and redeem_reset_code', callable('anon') === 'invite_preview,redeem_reset_code', callable('anon'));
-const WANT = 'branch_distance,claim_person,create_tree,in_tree,invite_preview,is_super_user,issue_reset_code,join_with_invite,my_nucleus,redeem_reset_code,release_claim,remove_person,set_super';
+check('signed-out visitors (anon) can call only invite_preview, open_invite and redeem_reset_code', callable('anon') === 'invite_preview,open_invite,redeem_reset_code', callable('anon'));
+const WANT = 'branch_distance,claim_person,create_tree,in_tree,invite_preview,is_super_user,issue_reset_code,join_with_invite,make_qr_invite,my_nucleus,open_invite,redeem_reset_code,release_claim,remove_person,set_super';
 check('signed-in users can call only what the app and the row rules need', callable('authenticated') === WANT, callable('authenticated'));
 const pub = rows(`select proname from pg_proc where pronamespace='public'::regnamespace
   and exists (select 1 from aclexplode(coalesce(proacl, acldefault('f', proowner))) a where a.grantee=0 and a.privilege_type='EXECUTE')`);
 check('no function is open to PUBLIC', pub.length === 0, pub.join(', '));
 for (const [fn, args] of [['create_tree', { nucleus_label: 'x', tree_nm: 'x' }], ['claim_person', { p: pA }], ['set_super', { target: nucA, flag: true }],
   ['join_with_invite', { invite_code: codeGeneral, nucleus_label: 'x', tree_nm: 'x' }], ['my_tree', {}], ['branch_distance', { p: pA }],
-  ['issue_reset_code', { p: pA }]]) {
+  ['issue_reset_code', { p: pA }], ['make_qr_invite', { p: pKid, invite_nm: 'x' }]]) {
   r = await anon.rpc(fn, args);
   check(`signed-out visitor calling ${fn} is refused`, !!r.error, r.error?.message || 'ran');
 }
 r = await anon.rpc('invite_preview', { invite_code: 'nope' });
 check('signed-out visitor can still use invite_preview', !r.error, r.error?.message);
+r = await anon.rpc('open_invite', { invite_code: 'nope' });
+check('signed-out visitor can use open_invite (the landing page)', !r.error && r.data === null, r.error?.message);
 r = await anon.from('memorial_style').select('id').limit(1);
 check('the daily keep-awake read still works signed out (memorial_style)', !r.error && r.data.length === 1, r.error?.message);
 r = await anon.from('person').select('id').limit(1);

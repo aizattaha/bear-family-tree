@@ -62,11 +62,15 @@ The app is wired to the live Supabase project (`garbnserzkuazmvonfem`). Opening 
 
 **Super users:** the first household of the tree is automatically the super user; up to **3 per tree**. Supers get a **⭐ button in the top bar** → *Super settings*: manage super users (make / remove), create general invite codes, and see / copy / **delete pending invites**. Super users can also **edit every person on the tree** — any profile, relationship, or memorial, claimed or not. Only super users can create invites. On a claimed person's card they get **🔑 help … back in**: a one-time code (8 characters, 30 minutes) that lets that household's login choose a new password from the sign-in screen's **Forgot your password?**.
 
-**Inviting family — two ways (super users only):**
-1. **Personal claim-link (the good one):** open any *unclaimed* person's sheet → **✉ invite [name] to claim this profile** → share the link or hit *send by email*. Whoever opens it creates an account and lands directly as that person — single use, valid 14 days.
-2. **General code:** your own sheet → *Invite family* → **✉ create a code** — anyone with it can join and then claim/add themselves.
+**Inviting family (super users only) — nothing is emailed; invites go by QR code or WhatsApp:**
+1. **Personal invite (the good one):** open any *unclaimed* person's card → **✉ invite [name] to claim this profile**. The sheet has two parts:
+   - **📷 With you now? Let them scan this** — a big QR code. They point their phone's camera at it, create an account and land straight in their place. It must be **scanned within 5 minutes** (a countdown shows "works for 4:59"); once scanned they have **30 minutes** to finish signing up, and your screen says "✓ scanned — … has until …", then "🎉 … has taken their place". When it runs out it greys out: tap **↻ refresh** for a brand-new code (the old one is deleted). Closing the sheet deletes a code nobody scanned. Whoever scans it first gets the profile — show it face to face only.
+   - **💬 Not with you? Send a link** — **make a 14-day link**, then **💬 WhatsApp** (pick the person in WhatsApp — the app holds no phone numbers) or **copy link**. Single use, 14 days; tapping again gives the same link until it's used or runs out.
+2. **General code:** ⭐ *Super settings* → *Invites* → **✉ create** — **💬 WhatsApp** or **copy link**; anyone with it can join (14 days) and then claim/add themselves.
 
-**Inviting a friend to start their OWN tree:** your own sheet → *Invite a friend to start their own tree* → **✉ share**. The link (`…#newtree`) lands them on a create-account page with a "create your own family tree!" banner, then straight into the start-tree form — they become the first super user of a completely separate tree. Trees never see each other.
+⭐ *Super settings* → *Invites* lists the 14-day links and codes (copy / delete) and any QR code that still works ("QR code", delete only); QR codes that ran out are never listed.
+
+**Inviting a friend to start their OWN tree:** your own sheet → *Invite a friend to start their own tree* → **✉ share** → **💬 WhatsApp** or **copy link**. The link (`…#newtree`) lands them on a create-account page with a "create your own family tree!" banner, then straight into the start-tree form — they become the first super user of a completely separate tree. Trees never see each other.
 
 **Tutorial:** every account walks through a 3-step tutorial on first entry (moving around · people & nicknames · making it yours). Reopen it any time from the **🎓** button in the top bar (hover: "tutorial").
 
