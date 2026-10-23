@@ -1803,9 +1803,12 @@ async function qrCheck(q){ const code=q.code; if(!code)return;
   const r=await sb.from('tree_invite').select('opened_at,expires_at,used_at,declined_at').eq('code',code).maybeSingle().then(x=>x,e=>({error:e}));
   if(QR!==q||q.code!==code||r.error)return;
   const done=()=>{ clearInterval(q.tick); q.code=null; };
-  // used invites stay on record now: the row says what happened
-  if(r.data&&r.data.used_at){ done(); qrShow(true,`🎉 ${esc(q.nm)} has taken their place on the tree`);
-    document.getElementById('ln_card').remove(); scheduleRefetch(); return; }
+  // used invites stay on record now: the row says what happened. Until keepers confirm a
+  // scan, the one-tap undo is right here: "that wasn't them" releases the claim at once
+  if(r.data&&r.data.used_at){ done(); qrShow(true,`🎉 ${esc(q.nm)} has taken their place on the tree<br>
+      <button class="link" id="qr_undo">↩ that wasn't ${esc(q.nm)}? undo — release this claim</button>`);
+    document.getElementById('ln_card').remove(); scheduleRefetch();
+    document.getElementById('qr_undo').onclick=()=>qrUndo(q); return; }
   if(r.data&&r.data.declined_at){ done();
     qrShow(true,`🚫 whoever scanned it said <b>this isn't them</b>, so the code is cancelled — tap refresh to make one for ${esc(q.nm)}`,true); return; }
   if(!r.data){ done(); qrShow(true,'this code was deleted — tap refresh for a new one',true); return; }
@@ -1821,6 +1824,13 @@ async function qrCheck(q){ const code=q.code; if(!code)return;
     const d=await dropQr(code,true); if(QR!==q)return;
     if(d.error){ dbErr(d.error); return; }
     done(); qrShow(true,'code cancelled — tap refresh for a new one',true); }; }
+async function qrUndo(q){ const b=document.getElementById('qr_undo'); if(!b)return;
+  b.disabled=true; b.textContent='releasing…';
+  const {error}=await sb.rpc('release_claim',{p:q.pid}).then(x=>x,e=>({error:e}));
+  if(QR!==q)return;
+  if(error){ dbErr(error); b.disabled=false; b.textContent=`↩ that wasn't ${q.nm}? undo — release this claim`; return; }
+  if(person(q.pid))person(q.pid).claimedBy=null; save(); rebuild();
+  qrShow(true,`claim released — ${esc(q.nm)}'s place is free again (this is recorded). Whoever signed up still has a login that can see the tree: ask Claude to remove it. Tap refresh to make a new code for ${esc(q.nm)}.`,true); }
 const dropQr=(code,evenScanned)=>{ let d=sb.from('tree_invite').delete().eq('code',code);
   if(!evenScanned)d=d.is('opened_at',null); // scanned: they're signing up — leave it for them
   return d.then(x=>x,e=>({error:e})); };

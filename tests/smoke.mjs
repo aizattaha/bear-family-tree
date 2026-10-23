@@ -334,6 +334,7 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
       if (q.postData()) bodies.push(q.postData());
       if (/rpc\/make_qr_invite/.test(u)) return r.fulfill({ json: { code: codes[made++ % 3], expires_at: new Date(Date.now() + 3e5).toISOString(), seconds: 300 } });
       if (/rpc\/make_newtree_code/.test(u)) return r.fulfill({ json: { code: 'abcabcabcabc', expires_at: new Date(Date.now() + 14 * 864e5).toISOString() } });
+      if (/rpc\/release_claim/.test(u)) return r.fulfill({ status: 204, body: '' });
       if (/tree_invite/.test(u) && q.method() === 'GET' && /select=opened_at/.test(u)) return r.fulfill({ json: invite() });
       if (/tree_invite/.test(u) && q.method() === 'GET') return r.fulfill({ json: [] });
       if (/tree_invite/.test(u) && q.method() === 'POST') return r.fulfill({ status: 201, json: [{ code: 'linklinklink', expires_at: new Date(Date.now() + 14 * 864e5).toISOString() }] });
@@ -378,6 +379,13 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await page.evaluate(() => qrCheck(QR));
     check(`${L}: used → "🎉 … has taken their place on the tree", and no more link to send`, /🎉 .+ has taken their place on the tree/.test(await page.textContent('#qr_state'))
       && await page.locator('#ln_card').count() === 0);
+    check(`${L}: …with a one-tap "that wasn't them? undo" right there`, await page.isVisible('#qr_undo'));
+    await tap('#qr_undo');
+    await page.waitForFunction(() => /claim released/.test(document.getElementById('qr_state').textContent), null, { timeout: 3000 }).catch(() => {});
+    check(`${L}: undo → release_claim at once, "claim released", the stranger's login mentioned, refresh shows`,
+      calls.some(c => /^POST rpc\/release_claim/.test(c)) && /claim released — .+free again/.test(await page.textContent('#qr_state'))
+      && /still has a login/.test(await page.textContent('#qr_state')) && await page.isVisible('#qr_new'), await page.textContent('#qr_state'));
+    await closeSheet(page);
     // "not me" on their phone: the keeper's screen says so, and offers a fresh code
     invite = () => [{ opened_at: null, expires_at: new Date(Date.now() + 3e5).toISOString() }];
     await page.evaluate(p => invitePerson(p), pid); await page.waitForSelector('#qr_box svg', { timeout: 3000 });
