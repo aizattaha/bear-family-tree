@@ -625,11 +625,11 @@ function closeCircle(me){ const par=parentsOf(me);
     ...par.flatMap(parentsOf),                              // grandparents
     ...par.flatMap(siblingsOf).flatMap(childrenOf)]); }     // first cousins
 // names I can pick for someone, or be warned I'm near: what my close family call them
-// (never a wider-family name — those are only counted — nor one I can't see). For myself,
-// what people call me, minus "only us" names, so a pick can't make a private one public
+// (never a wider-family name — those are only counted), or for myself, what people call
+// me. Never a 🔒 only-us name, even one I can see: a pick saves as public, so it would leak
 function pickableNicks(pid){ const me=viewing(), circle=closeCircle(me);
   return [...new Set(Object.entries(S.nicknames)
-    .filter(([v,map])=>v!==me&&map[pid]&&(pid===me?!isPrivNick(v,me):canSeeNick(v,pid)&&(v===pid||circle.has(v))))
+    .filter(([v,map])=>v!==me&&map[pid]&&!isPrivNick(v,pid)&&(pid===me||v===pid||circle.has(v)))
     .sort(([a],[b])=>(b===pid)-(a===pid)).map(([v,map])=>map[pid]))]; }
 // steps between two names: a wrong, missing or extra letter is one, so is a swap of two
 function nickSteps(a,b){ const d=[];

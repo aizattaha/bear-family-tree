@@ -376,6 +376,14 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await page.fill('#mynick', 'Imzi'); await save();
     check(`${L}: …and a typed name near it saves without asking (it would give the name away)`,
       (await mine('iman')).n === 'Imzi' && await page.locator('#nickcheck').count() === 0);
+    // Aisha: her sister's name for her is 🔒 only-us — never offered, never suggested
+    await page.evaluate(() => { S.nickPriv.alya = { aisha: true }; });
+    await card('aisha');
+    check(`${L}: a 🔒 only-us name is never offered`, await page.locator('#sheetbody .usenick').count() === 0
+      && await page.evaluate(() => !pickableNicks('aisha').includes('Adik')));
+    await page.fill('#mynick', 'Adk'); await save();
+    check(`${L}: …nor suggested — a typed name near it saves without asking`,
+      (await mine('aisha')).n === 'Adk' && await page.locator('#nickcheck').count() === 0);
     // own card: "You go by" — pick from what people call me, never a 🔒 only-us name
     await page.evaluate(() => { S.nickPriv.ina = { aizat: true }; });
     await card('aizat');
