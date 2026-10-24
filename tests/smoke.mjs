@@ -388,6 +388,87 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await ctx.close();
   });
 }
+// ---------- nicknames: pick one the close family already uses; a near-miss is asked about ----------
+for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }],
+  ['phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+  await guard(`pick nickname (${label})`, async () => {
+    const L = `pick nickname (${label})`, phone = label === 'phone';
+    const { ctx, page, errors, supabase } = await demo(L, opts);
+    const tap = loc => phone ? loc.tap() : loc.click();
+    const card = async pid => { await page.evaluate(p => openPerson(p), pid); await sheetOpen(page); };
+    const mine = pid => page.evaluate(p => ({ n: (S.nicknames.aizat || {})[p] || '', priv: isPrivNick('aizat', p) }), pid);
+    const asked = async () => (await page.textContent('#nickcheck').catch(() => '')).replace(/\s+/g, ' ').trim();
+    const save = () => tap(page.locator('#sheetbody .bignick button'));
+    if (!phone) {
+      const near = await page.evaluate(() => [
+        ['Aryn', ['Ayne'], 'Ayne'],                // 2 steps on a 4-letter name — the shape of Aizat's own example
+        ['Rnia', ['Rina'], 'Rina'],                // two letters swapped = 1 step
+        ['rina', ['Rina'], 'Rina'],                // only capitals differ: offer the list's spelling
+        ['Kak  Ina', ['Kak Ina'], 'Kak Ina'],      // only spaces differ
+        ['Rina', ['Rena', 'Rina'], ''],            // an exact match is never asked about
+        ['Bon', ['Bob'], 'Bob'], ['Ben', ['Bob'], ''], // 3 letters: 1 step is near, 2 is a different name
+        ['Jo', ['Jon'], ''],                       // 1–2 letter names are left alone
+        ['Princess', ['Adik', 'Kakak'], ''],       // clearly different
+        ['Atuk', ['Tok Wan', 'Atok'], 'Atok'],     // the closest of several
+      ].filter(([t, names, want]) => nearNick(t, names) !== want).map(([t, names]) => `${t} → "${nearNick(t, names)}"`));
+      check(`${L}: the near-miss rule (case, spaces, swaps, 1 step on 3 letters, 2 on longer)`, near.length === 0, near.join(' | '));
+    }
+    // Alya: Aizat has no name for her yet; her sister calls her "Kakak"
+    await card('alya');
+    const use = page.locator('#sheetbody .usenick');
+    check(`${L}: no name of mine yet → the close family's name has "use this name"`,
+      await use.count() === 1 && /Kakak/.test(await page.textContent('#sheetbody .nickrow.pick')));
+    if (phone) { const b = await use.boundingBox();
+      check(`${L}: "use this name" is big enough to tap (≥ 40px tall)`, b && b.height >= 40 && b.x + b.width <= 375, b && `${Math.round(b.width)}×${Math.round(b.height)}`); }
+    await tap(use);
+    check(`${L}: one tap saves it as mine — not only-us — and says so`, JSON.stringify(await mine('alya')) === '{"n":"Kakak","priv":false}'
+      && /saved — you call them Kakak/.test(await page.textContent('#toast')), JSON.stringify(await mine('alya')));
+    check(`${L}: …then the buttons go, and the box shows it`, await page.locator('#sheetbody .usenick').count() === 0 && await page.inputValue('#mynick') === 'Kakak');
+    // Danish: his sister Sarah calls him "Adik" — a typo of it is asked about before saving
+    await card('danish');
+    await page.fill('#mynick', 'Aidk'); await save();
+    check(`${L}: a near-miss asks first — "Others call them Adik. You typed Aidk." — nothing saved yet`,
+      /^Others call them Adik\. You typed Aidk\. Use Adik Keep Aidk$/.test(await asked()) && (await mine('danish')).n === '', await asked());
+    if (phone) { const bs = await page.locator('#nickcheck button').evaluateAll(els => els.map(e => e.getBoundingClientRect().right));
+      check(`${L}: the question's buttons fit the screen`, bs.length === 2 && bs.every(r => r <= 375), bs.join(', ')); }
+    await tap(page.locator('#nickcheck button', { hasText: 'Use Adik' }));
+    check(`${L}: "Use Adik" saves the family's spelling`, (await mine('danish')).n === 'Adik' && await page.locator('#nickcheck').count() === 0);
+    await page.fill('#mynick', 'adik'); await save();
+    check(`${L}: only capitals differ → offers the list's spelling too`, /^Others call them Adik\. You typed adik\./.test(await asked()), await asked());
+    await page.fill('#mynick', 'adikk');
+    check(`${L}: typing again puts the question away`, await page.locator('#nickcheck').count() === 0);
+    await page.fill('#mynick', 'adik'); await save();
+    await tap(page.locator('#nickcheck button', { hasText: 'Keep adik' }));
+    check(`${L}: "Keep adik" saves what was typed`, (await mine('danish')).n === 'adik' && await page.locator('#nickcheck').count() === 0);
+    await tap(page.locator('#mynick_priv'));
+    check(`${L}: ticking 🔒 on a name already kept doesn't ask again`, JSON.stringify(await mine('danish')) === '{"n":"adik","priv":true}'
+      && await page.locator('#nickcheck').count() === 0, JSON.stringify(await mine('danish')));
+    await page.fill('#mynick', 'Danny'); await save();
+    check(`${L}: a clearly different name saves straight away`, (await mine('danish')).n === 'Danny' && await page.locator('#nickcheck').count() === 0);
+    // Iman: only someone from the wider family has a name for him — never offered, never hinted at
+    await page.evaluate(() => { S.nicknames.emma = { iman: 'Imzy' }; });
+    await card('iman');
+    check(`${L}: a wider-family name is only counted — no button, not shown`, await page.locator('#sheetbody .usenick').count() === 0
+      && /\+ 1 more name used in the wider family/.test(await page.textContent('#sheetbody')) && !/Imzy/.test(await page.textContent('#sheetbody')));
+    await page.fill('#mynick', 'Imzi'); await save();
+    check(`${L}: …and a typed name near it saves without asking (it would give the name away)`,
+      (await mine('iman')).n === 'Imzi' && await page.locator('#nickcheck').count() === 0);
+    // own card: "You go by" — pick from what people call me, never a 🔒 only-us name
+    await page.evaluate(() => { S.nickPriv.ina = { aizat: true }; });
+    await card('aizat');
+    const offered = await page.locator('#sheetbody .nickrow.pick .nickname').allTextContents();
+    check(`${L}: own card offers what people call me, minus 🔒 names`, offered.length > 1 && offered.includes('Ayah') && !offered.includes('Adik'), offered.join(', '));
+    await tap(page.locator('#sheetbody .usenick[data-nick="Ayah"]'));
+    check(`${L}: …one tap and I go by it`, await page.evaluate(() => S.nicknames.aizat.aizat) === 'Ayah' && /saved — you go by Ayah/.test(await page.textContent('#toast')));
+    await page.fill('#mynick', 'Abang Lonh'); await save();
+    check(`${L}: own card: a near-miss asks too — "People call you Abang Long"`, /^People call you Abang Long\. You typed Abang Lonh\./.test(await asked()), await asked());
+    await tap(page.locator('#nickcheck button', { hasText: 'Use Abang Long' }));
+    check(`${L}: …"Use Abang Long" saves it`, await page.evaluate(() => S.nicknames.aizat.aizat) === 'Abang Long');
+    check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
+    check(`${L}: the demo never contacted Supabase`, supabase.length === 0, supabase.join(' | '));
+    await ctx.close();
+  });
+}
 // the website goes live a few minutes before the database update: until the column is there,
 // the app leaves it out of every save (so saving keeps working), then reads and sends it
 await guard('tree name (database)', async () => {
