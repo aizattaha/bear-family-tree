@@ -311,6 +311,84 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
   });
 }
 
+// ---------- the name on the tree: a first name of two words ("Mei Ling Tan" → "Mei Ling") ----------
+for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }],
+  ['phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
+  await guard(`tree name (${label})`, async () => {
+    const L = `tree name (${label})`, phone = label === 'phone';
+    const { ctx, page, errors, supabase } = await demo(L, opts);
+    const tap = loc => phone ? loc.tap() : loc.click();
+    const line = id => page.evaluate(i => { const e = document.getElementById(i + '_tn'); return e && !e.hidden ? e.textContent.replace(/\s+/g, ' ').trim() : null; }, id);
+    const save = () => tap(page.locator('#sheetbody button.btn.primary:has-text("Save")'));
+    check(`${L}: everyone already in the tree still goes by the first word of their name`, await page.evaluate(() =>
+      Object.values(S.persons).filter(p => !isPlaceholder(p.id) && !selfNick(p.id)).every(p => goesBy(p.id) === p.name.split(' ')[0])));
+    // Add relative: the line appears as soon as the name has two words
+    await page.evaluate(() => openAdd('sarah')); await sheetOpen(page);
+    check(`${L}: Add relative — no line before a name is typed`, await line('a_name') === null);
+    await page.fill('#a_name', 'Ali');
+    check(`${L}: …nor for a one-word name`, await line('a_name') === null);
+    await page.fill('#a_name', '?');
+    check(`${L}: …nor for "?" (name not known yet)`, await line('a_name') === null);
+    await page.fill('#a_name', 'Mei Ling Tan');
+    check(`${L}: typing "Mei Ling Tan" shows "On the tree: Mei · change"`, await line('a_name') === 'On the tree: Mei · change', await line('a_name'));
+    await tap(page.locator('#a_name_tn button'));
+    const chips = await page.$$eval('#a_name_tp [data-w]', bs => bs.map(b => b.textContent + (b.getAttribute('aria-pressed') === 'true' ? '*' : '')));
+    check(`${L}: change → the words to tap, "Mei" picked`, chips.join(',') === 'Mei*,Ling,Tan', chips.join(','));
+    await tap(page.locator('#a_name_tp [data-w="1"]'));
+    check(`${L}: tapping "Ling" → "On the tree: Mei Ling"`, await line('a_name') === 'On the tree: Mei Ling · done', await line('a_name'));
+    if (phone) {
+      const bx = await page.$$eval('#a_name_tn button, #a_name_tp [data-w]', bs => bs.map(b => { const r = b.getBoundingClientRect(); return { t: b.textContent, h: Math.round(r.height), l: Math.round(r.left), r: Math.round(r.right) }; }));
+      check(`${L}: "done" and the words are big enough to tap (≥ 32px) and fit the screen`, bx.length === 4 && bx.every(b => b.h >= 32 && b.l >= 0 && b.r <= 375), JSON.stringify(bx));
+    }
+    await tap(page.locator('.choice[data-rel="child"]'));
+    await tap(page.locator('#a_save'));
+    const added = await page.evaluate(() => { const p = Object.values(S.persons).find(x => x.name === 'Mei Ling Tan'), n = p && document.querySelector(`.node[data-pid="${p.id}"]`);
+      return p && { id: p.id, short: p.shortName, nick: n && n.querySelector('.nick').textContent, full: n && n.querySelector('.full').textContent }; });
+    check(`${L}: saved — the tree shows "Mei Ling", with "Mei Ling Tan" under it`, !!added && added.short === 'Mei Ling' && added.nick === 'Mei Ling' && added.full === 'Mei Ling Tan', JSON.stringify(added));
+    if (!phone) {
+      // their card: the pick is there; words that leave the name take it back to the first word
+      await page.waitForFunction(() => !document.getElementById('sheet').classList.contains('open'));
+      await page.evaluate(id => openPerson(id), added.id); await sheetOpen(page);
+      check(`${L}: their card says "On the tree: Mei Ling · change"`, await line('f_name') === 'On the tree: Mei Ling · change', await line('f_name'));
+      await page.fill('#f_name', 'Siew Mei Ling');
+      check(`${L}: a name typed around the picked words keeps them`, /^On the tree: Mei Ling ·/.test(await line('f_name')), await line('f_name'));
+      await page.fill('#f_name', 'Mei Hua Tan');
+      check(`${L}: …a name without "Ling" any more goes back to its first word`, /^On the tree: Mei ·/.test(await line('f_name')), await line('f_name'));
+      await page.fill('#f_name', 'Mei Ling Tan');
+      await page.click('#f_name_tn button'); await page.fill('#f_name_type', 'Lingling');
+      check(`${L}: or type it — "On the tree: Lingling"`, /^On the tree: Lingling ·/.test(await line('f_name')), await line('f_name'));
+      await save();
+      check(`${L}: …saved, and the tree shows "Lingling"`, await page.evaluate(id => S.persons[id].shortName === 'Lingling'
+        && document.querySelector(`.node[data-pid="${id}"] .nick`).textContent === 'Lingling', added.id));
+      // one word, the default or "?" keeps nothing
+      check(`${L}: nothing is kept when it's just the first word, a one-word name or "?"`, await page.evaluate(() =>
+        shortFor('Mei Ling Tan', 'Mei') === '' && shortFor('Mei', 'Mei Ling') === '' && shortFor('?', 'Mei') === '' && shortFor('Mei Ling Tan', '  Mei   Ling ') === 'Mei Ling'));
+      // the order: my nickname → their own "You go by" → the name on the tree → the first word
+      const order = await page.evaluate(() => { const ina = S.persons.ina; ina.shortName = 'Nur Aina'; const r = [displayName('ina'), goesBy('ina')];
+        S.nicknames.ina = S.nicknames.ina || {}; S.nicknames.ina.ina = 'Ina'; r.push(goesBy('ina')); delete S.nicknames.ina.ina;
+        ina.shortName = ''; r.push(goesBy('ina')); return r; });
+      check(`${L}: shown in order — my nickname, their own "You go by", the name on the tree, the first word`, order.join('|') === 'Kak Ina|Nur Aina|Ina|Nur', order.join('|'));
+      // someone who can't edit them sees no line (Baba, 6 branches from Farid)
+      await page.waitForFunction(() => !document.getElementById('sheet').classList.contains('open'));
+      const other = await page.evaluate(() => { const keep = S.session; S.session = { nucleusId: 'n4', viewingAs: 'baba' };
+        openPerson('farid'); const r = { disabled: document.getElementById('f_name').disabled, line: !!document.getElementById('f_name_tn') }; S.session = keep; return r; });
+      check(`${L}: someone who can't edit them gets no "change"`, other.disabled && !other.line, JSON.stringify(other));
+      await sheetOpen(page); await closeSheet(page);
+      // my own card: the same line, until I choose what I go by
+      await page.evaluate(() => openSelf()); await sheetOpen(page);
+      check(`${L}: my own card — "On the tree: Aizat · change", and "You go by" hints "Aizat"`, await line('f_name') === 'On the tree: Aizat · change'
+        && await page.getAttribute('#mynick', 'placeholder') === 'Aizat', await line('f_name'));
+      // a name far from the family's names for me, so the typo check (#11) doesn't ask first
+      await page.fill('#mynick', 'Kapten'); await page.click('#sheetbody .bignick button');
+      await page.waitForTimeout(200);
+      check(`${L}: …once I go by "Kapten", the line says so, with nothing to change`, await line('f_name') === 'On the tree: Kapten — your "You go by" above'
+        && await page.locator('#f_name_tn button').count() === 0, await line('f_name'));
+    }
+    check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
+    check(`${L}: the demo never contacted Supabase`, supabase.length === 0, supabase.join(' | '));
+    await ctx.close();
+  });
+}
 // ---------- nicknames: pick one the close family already uses; a near-miss is asked about ----------
 for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 } }],
   ['phone', { viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, deviceScaleFactor: 2 }]]) {
@@ -392,6 +470,31 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
     await ctx.close();
   });
 }
+// the website goes live a few minutes before the database update: until the column is there,
+// the app leaves it out of every save (so saving keeps working), then reads and sends it
+await guard('tree name (database)', async () => {
+  const L = 'tree name (database)';
+  const { ctx, page, errors } = await demo(L, { viewport: { width: 1280, height: 800 } });
+  let rows = [{ id: 'p1', tree_id: 't1', full_name: 'Mei Ling Tan', claimed_by: 'n1' }]; const sent = [];
+  await page.route(/supabase\.co/, r => { const q = r.request(), u = decodeURIComponent(q.url());
+    if (q.method() !== 'GET') { sent.push(`${q.method()} ${q.postData() || ''}`); return r.fulfill({ json: [{ id: 'p1' }] }); }
+    if (/\/account\?/.test(u)) return r.fulfill({ json: [{ nucleus_id: 'n1', nucleus: { tree_id: 't1' } }] });
+    const out = /\/nucleus\?/.test(u) ? [{ id: 'n1', tree_name: 'T', label: 'L', is_super: false }] : /\/person\?/.test(u) ? rows : [];
+    r.fulfill({ json: out, headers: { 'content-range': out.length ? `0-${out.length - 1}/${out.length}` : '*/0' } }); });
+  const run = () => page.evaluate(async () => { MODE = 'cloud';
+    try { await cloudFetchAll(); const on = shortNamesOn(), sn = S.persons.p1.shortName; S.persons.p1.shortName = 'Mei Ling';
+      await db.savePerson(S.persons.p1); await db.insertPerson({ ...S.persons.p1, id: 'p2' }); return { on, sn }; }
+    finally { MODE = 'demo'; } });
+  let res = await run();
+  check(`${L}: before the update — the column is missing, so saves leave it out and still go through`, !res.on && sent.length === 2
+    && sent.every(b => !/short_name/.test(b)) && /^PATCH .*"full_name":"Mei Ling Tan"/.test(sent[0]), JSON.stringify({ res, sent }));
+  rows = [{ ...rows[0], short_name: 'Mei Ling' }]; sent.length = 0;
+  res = await run();
+  check(`${L}: after it — read back ("Mei Ling"), and sent with every save and every new person`, res.on && res.sn === 'Mei Ling' && sent.length === 2
+    && sent.every(b => /"short_name":"Mei Ling"/.test(b)), JSON.stringify({ res, sent }));
+  check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+});
 
 // ---------- invite sheets: a QR code to scan, WhatsApp instead of email ----------
 // Keepers' sheets are cloud-only, so the page gets made-up database answers here

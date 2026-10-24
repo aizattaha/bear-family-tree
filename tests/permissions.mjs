@@ -9,6 +9,7 @@
 //      + "Is this you?": a personal invite's family, first names only
 //   7. soft-launch fixes (2026-10-25): households named after a member, start-a-tree codes
 //      + caps, "not me", used invites kept + counts, the code alone resets a password
+//   7b. the name on the tree (2026-10-25): short_name — set only by whoever may edit the person
 //   8. catalog: search_path + who may call which function, Finance leftovers gone
 // env: SUPABASE_URL, SUPABASE_KEY (publishable), DB_CONTAINER (the stack's db container)
 // usage: node permissions.mjs        (exit code 1 if anything fails)
@@ -971,6 +972,59 @@ section = '[kept] ';
   check('a signed-out visitor sees nothing', !!r.error || r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
   r = await K.rpc('remove_person', { p: pM });
   check('removing someone keeps the invite they joined with', !r.error && sql(`select count(*) from tree_invite where code='${fake.data.code}'`).trim() === '1', r.error?.message);
+}
+
+/* ============ 7b. the name on the tree (2026-10-25): short_name ============ */
+section = '[treename] ';
+{
+  const sn = id => sql(`select coalesce(short_name, '<none>') from person where id='${id}'`).trim();
+  const x5 = chain[4]; // 5 branches from B, nobody's claim
+  r = await B.from('person').update({ short_name: 'Mei Ling' }).eq('id', x5).select('id');
+  check('a member sets the name on the tree for someone within 5 branches', !r.error && r.data.length === 1 && sn(x5) === 'Mei Ling', r.error?.message || sn(x5));
+  r = await B.from('person').update({ short_name: 'Mei Ling' }).eq('id', pB).select('id');
+  check('…and for someone their own household claimed', !r.error && r.data.length === 1 && sn(pB) === 'Mei Ling', r.error?.message || sn(pB));
+  r = await B.from('person').update({ short_name: 'Far Name' }).eq('id', pFar).select('id');
+  check('a member CAN\'T set it for someone 6 branches away', !r.error && r.data.length === 0 && sn(pFar) === '<none>', r.error?.message || sn(pFar));
+  r = await B.from('person').update({ short_name: 'Not Mine' }).eq('id', pA).select('id');
+  check('a member CAN\'T set it for someone another household claimed', !r.error && r.data.length === 0 && sn(pA) === '<none>', r.error?.message || sn(pA));
+  r = await A.from('person').update({ short_name: 'Far Name' }).eq('id', pFar).select('id');
+  check('a tree keeper (super) can, at any distance', !r.error && r.data.length === 1 && sn(pFar) === 'Far Name', r.error?.message || sn(pFar));
+  r = await C.from('person').update({ short_name: 'Other Tree' }).eq('id', x5).select('id');
+  check('someone from another tree can\'t', !r.error && r.data.length === 0 && sn(x5) === 'Mei Ling', r.error?.message || sn(x5));
+  r = await anon.from('person').update({ short_name: 'Signed Out' }).eq('id', x5).select('id');
+  check('a signed-out visitor can\'t', (!!r.error || r.data.length === 0) && sn(x5) === 'Mei Ling', r.error?.message || sn(x5));
+  r = await C.from('person').select('short_name').eq('id', x5);
+  check('another tree reads nothing', !r.error && r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
+  r = await anon.from('person').select('short_name').limit(1);
+  check('signed-out visitors read nothing', !!r.error || r.data.length === 0, r.error?.message || 'rows=' + r.data.length);
+  // the old app (a phone still on the page from before) never sends it: a save leaves it as it was
+  r = await B.from('person').update({ full_name: 'Mei Ling Test', born: '1990' }).eq('id', x5).select('id');
+  check('a save without it (the old app) keeps it', !r.error && r.data.length === 1 && sn(x5) === 'Mei Ling', r.error?.message || sn(x5));
+  for (const [v, ok] of [['', false], [' Mei Ling', false], ['Mei Ling ', false], ['x'.repeat(41), false], ['x'.repeat(40), true], [null, true]]) {
+    r = await B.from('person').update({ short_name: v }).eq('id', x5).select('id');
+    check(`short_name ${v === null ? 'null (not set)' : JSON.stringify(v.length > 12 ? v.length + ' characters' : v)} → ${ok ? 'saved' : 'refused'}`,
+      ok ? !r.error && r.data.length === 1 : !!r.error, r.error?.message || 'rows=' + r.data?.length);
+  }
+  check('…null clears it', sn(x5) === '<none>', sn(x5));
+  const pAdd = randomUUID();
+  r = await B.from('person').insert({ id: pAdd, tree_id: treeA, full_name: 'Nur Aina Test', short_name: 'Nur Aina' }).select('id');
+  check('Add relative can send it with the new person', !r.error && sn(pAdd) === 'Nur Aina', r.error?.message || sn(pAdd));
+  // a household is named after its first member's name on the tree; their own "You go by" still wins
+  const goes = id => sql(`select coalesce(goes_by('${id}'), '<none>')`).trim();
+  const pPlain = randomUUID();
+  await B.from('person').insert({ id: pPlain, tree_id: treeA, full_name: 'Siti Nur Test' });
+  check('the database\'s "goes by": the first word when nothing is set ("Siti")', goes(pPlain) === 'Siti', goes(pPlain));
+  check('…the name on the tree when it is ("Nur Aina")', goes(pAdd) === 'Nur Aina', goes(pAdd));
+  sql(`insert into nickname (tree_id, person_id, viewer_person_id, text, private) values ('${treeA}', '${pAdd}', '${pAdd}', 'Kak Aina', false)`);
+  check('…their own "You go by" before both ("Kak Aina")', goes(pAdd) === 'Kak Aina', goes(pAdd));
+  const K = await user('tk');
+  r = await newTree(K, '', 'Keluarga Test');
+  const tk = r.data, nucK = await nucOf(K), pK = randomUUID();
+  const lab = n => sql(`select label||'|'||label_auto from nucleus where id='${n}'`).trim();
+  await K.from('person').insert({ id: pK, tree_id: tk, full_name: 'Mei Ling Tan', short_name: 'Mei Ling', claimed_by: nucK });
+  check('a founder added as "Mei Ling Tan", on the tree as "Mei Ling": "Mei Ling\'s household"', lab(nucK) === "Mei Ling's household|false", lab(nucK));
+  const col = sql(`select data_type||'|'||is_nullable from information_schema.columns where table_schema='public' and table_name='person' and column_name='short_name'`).trim();
+  check('person.short_name: text, empty for everyone unless set', col === 'text|YES', col);
 }
 
 /* ============ 8. catalog: search_path + who may call what ============ */
