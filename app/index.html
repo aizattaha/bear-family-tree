@@ -196,6 +196,16 @@ a.btn{text-decoration:none;}
   .bignick input{font-size:20px!important;}
 }
 .fld input:disabled,.fld select:disabled,.fld textarea:disabled{color:var(--ink-soft);}
+/* "On the tree: Mei · change" under a name box, and the words to pick from */
+.tnline{margin:-4px 0 10px 2px;}
+.tnline b{color:var(--ink);font-weight:600;}
+.tnline .link{padding:8px 6px;margin:-8px -6px;} /* a finger-sized target, same line height */
+.tnpick{margin:-4px 0 10px;padding:10px 12px;background:var(--field);border-radius:14px;}
+.wordpick{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 10px;}
+.wordpick button{min-height:34px;padding:6px 14px;border-radius:999px;background:#fff;color:var(--primary);
+  font-size:14px;font-weight:500;box-shadow:inset 0 0 0 1.5px var(--accent);}
+.wordpick button[aria-pressed="true"]{background:var(--primary);color:#fff;box-shadow:none;}
+.tnpick .fld{background:#fff;margin-bottom:0;}
 .photorow{display:flex;gap:12px;justify-content:space-between;}
 .pslot{flex:1;text-align:center;}
 .pslot .ph{width:72px;height:72px;border-radius:50%;background:#fff;margin:0 auto 5px;position:relative;
@@ -403,7 +413,7 @@ const minsLeft=d=>Math.max(1,Math.ceil((d-Date.now())/60000));
 function personFromRow(r){ const photos={};
   if(okPhoto(r.photo_kid))photos.k=r.photo_kid; if(okPhoto(r.photo_teen))photos.t=r.photo_teen;
   if(okPhoto(r.photo_adult))photos.a=r.photo_adult;
-  return {id:r.id,name:r.full_name,gender:r.gender||'',couplePos:r.couple_pos||'',born:r.born||'',
+  return {id:r.id,name:r.full_name,shortName:r.short_name||'',gender:r.gender||'',couplePos:r.couple_pos||'',born:r.born||'',
     country:r.living_country||'',notes:r.notes||'',claimedBy:r.claimed_by,photos,
     mainPhoto:DB2MAIN[r.main_photo]||'a',passed:null}; }
 // the data API hands back at most 1,000 rows per request: read every page, in a
@@ -430,6 +440,8 @@ async function cloudFetchAll(){
   S.nuclei={}; nuc.forEach(n=>{S.nuclei[n.id]={id:n.id,treeName:n.tree_name,label:n.label,isSuper:!!n.is_super};});
   ME.treeId=tree;
   S.persons={}; per.forEach(r=>S.persons[r.id]=personFromRow(r));
+  // "the name on the tree" needs a database column; until it's there, the app works without it
+  if(per.length)ME.shortNames='short_name' in per[0];
   mem.forEach(m=>{ const p=S.persons[m.person_id];
     if(p)p.passed={date:m.passed_on||'',styleId:m.style_id||'gen1',custom:m.custom_text||''}; });
   // a link to someone removed (or half-removed) must never blank the tree
@@ -464,6 +476,9 @@ function dbErr(e){ console.error('sync',e);
 // a refused update/delete comes back as "success, 0 rows changed" — count the rows
 async function wrote(q,col){ const {data,error}=await q.select(col||'id');
   if(error)throw error; if(!data||!data.length)throw new Error('0 rows changed'); return data; }
+// the name on the tree goes out only once the database has its column
+const shortNamesOn=()=>MODE!=='cloud'||!!ME.shortNames;
+const shortCol=p=>shortNamesOn()?{short_name:p.shortName||null}:{};
 async function attempt(fn){ if(!db.on())return true;
   try{ await fn(); return true; }catch(e){ dbErr(e); return false; } }
 const db={
@@ -475,7 +490,7 @@ const db={
       {onConflict:'person_id,viewer_person_id'}));
     else if(had)await wrote(sb.from('nickname').delete()
       .match({person_id:pid,viewer_person_id:viewer})); }); },
-  savePerson(p){ return attempt(()=>wrote(sb.from('person').update({full_name:p.name,gender:p.gender||null,
+  savePerson(p){ return attempt(()=>wrote(sb.from('person').update({full_name:p.name,...shortCol(p),gender:p.gender||null,
       couple_pos:p.couplePos||null,born:p.born||null,living_country:p.country||null,
       notes:p.notes||'',main_photo:MAIN2DB[p.mainPhoto]||'adult',
       photo_kid:p.photos.k||null,photo_teen:p.photos.t||null,photo_adult:p.photos.a||null})
@@ -484,7 +499,7 @@ const db={
     if(p.passed)await wrote(sb.from('memorial').upsert({person_id:p.id,tree_id:ME.treeId,
       passed_on:p.passed.date||null,style_id:p.passed.styleId||'gen1',custom_text:p.passed.custom||null}),'person_id');
     else if(had)await wrote(sb.from('memorial').delete().eq('person_id',p.id),'person_id'); }); },
-  insertPerson(p){ return attempt(()=>wrote(sb.from('person').insert({id:p.id,tree_id:ME.treeId,full_name:p.name,
+  insertPerson(p){ return attempt(()=>wrote(sb.from('person').insert({id:p.id,tree_id:ME.treeId,full_name:p.name,...shortCol(p),
       gender:p.gender||null,born:p.born||null,living_country:p.country||null,
       claimed_by:p.claimedBy||null}))); },
   insertRel(r){ return attempt(async()=>{
@@ -562,11 +577,15 @@ function canEditMemorial(pid){ return isSuper()||branchDistance(pid)<=5; }
 /* ================= names / display ================= */
 const viewing=()=>S.session.viewingAs;
 function nickFor(pid){ return (S.nicknames[viewing()]||{})[pid]||''; }
+const selfNick=pid=>(S.nicknames[pid]||{})[pid]||'';
 // what I call them; if I haven't named them, the name they go by
 function displayName(pid){ return nickFor(pid)||goesBy(pid); }
-// the name someone chose for themselves ("You go by"), else their first name
+// the name someone chose for themselves ("You go by"), else the family's name on the tree
 function goesBy(pid){ const per=person(pid);
-  return (S.nicknames[pid]||{})[pid]||(per?(isPlaceholder(pid)?placeholderLabel(pid):per.name.split(' ')[0]):'?'); }
+  return (S.nicknames[pid]||{})[pid]||(per?(isPlaceholder(pid)?placeholderLabel(pid):shortNameOf(per)):'?'); }
+// the name on the tree: the words the family picked ("Mei Ling" of "Mei Ling Tan"), else the first word
+const words=s=>String(s||'').trim().split(/\s+/).filter(Boolean);
+const shortNameOf=per=>per.shortName||words(per.name)[0]||'';
 // "?" placeholders: someone added before their name is known — usually a married-in
 // spouse, so the children can hang under the couple. Same rule as the database's
 // name_unknown mark: only "?"s and dashes ("?", "??", "-", "—"), "unknown" (any case) or empty
@@ -602,6 +621,46 @@ function whereOf(pid){ const par=parentsOf(pid), kids=childrenOf(pid);
 function subName(pid){ if(!isPlaceholder(pid))return person(pid).name;
   const l=placeholderLabel(pid); if(displayName(pid)!==l)return l;
   return l===NO_NAME?whereOf(pid):'name not known yet'; }
+// the name on the tree, chosen as the name is typed: a full name of 2+ words shows just its
+// first word, which is wrong when the first name is two words ("Mei Ling", "Nur Aina") — so
+// a line under the name box says what the tree will show, and "change" lets whoever is
+// typing tap the words (or type it). Nothing is guessed from the name.
+// What's kept: nothing when it's the first word anyway, or the name is one word or not known yet
+function shortFor(name,pick){ const w=words(name); pick=words(pick).join(' ').slice(0,40).trim();
+  return !pick||w.length<2||UNKNOWN_NAME.test(name)||pick===w[0]?'':pick; }
+const shortNameHtml=id=>`<div class="cap2 tnline" id="${id}_tn" hidden></div><div class="tnpick" id="${id}_tp" hidden></div>`;
+// id: the name box (its pick is kept in dataset.short until Save); start: their name on the
+// tree now; chosen: the name they chose themselves ("You go by"), which the tree shows instead
+function wireShortName(id,start,chosen,chosenNote){
+  const inp=document.getElementById(id), line=document.getElementById(id+'_tn'), box=document.getElementById(id+'_tp');
+  if(!inp||!line||!box)return;
+  let open=false, last=words(inp.value);
+  inp.dataset.short=start||'';
+  const draw=picker=>{ const w=words(inp.value), pick=inp.dataset.short;
+    const on=shortNamesOn()&&!inp.disabled&&w.length>1&&!UNKNOWN_NAME.test(inp.value);
+    line.hidden=!on; box.hidden=!on||!open||!!chosen; if(!on)return;
+    line.innerHTML=chosen?`On the tree: <b>${esc(chosen)}</b> — ${esc(chosenNote)}`
+      :`On the tree: <b>${esc(pick||w[0])}</b> · <button type="button" class="link" data-tn="1">${open?'done':'change'}</button>`;
+    if(box.hidden||!picker)return;
+    const pw=words(pick), typed=!!pick&&!pw.every(x=>w.includes(x));
+    box.innerHTML=`<div class="cap2">tap the words the family sees on the tree</div>
+      <div class="wordpick">${w.map((x,i)=>`<button type="button" data-w="${i}" aria-pressed="${!typed&&(pick?pw.includes(x):i===0)}">${esc(x)}</button>`).join('')}</div>
+      <div class="fld"><span class="flabel">or type it</span><input id="${id}_type" maxlength="40" autocomplete="off" value="${typed?esc(pick):''}" placeholder="${esc('e.g. '+w.slice(0,2).join(' '))}"></div>`; };
+  inp.addEventListener('input',()=>{ const w=words(inp.value), pw=words(inp.dataset.short);
+    // words picked from the name that aren't in it any more: back to its first word
+    if(pw.length&&pw.every(x=>last.includes(x))&&!pw.every(x=>w.includes(x)))inp.dataset.short='';
+    last=w; draw(true); });
+  line.onclick=e=>{ if(!e.target.closest('[data-tn]'))return; open=!open; draw(true);
+    if(open)box.scrollIntoView({block:'nearest'}); };
+  box.onclick=e=>{ const b=e.target.closest('[data-w]'); if(!b)return;
+    const sel=[...box.querySelectorAll('[data-w]')].map(x=>x.getAttribute('aria-pressed')==='true');
+    sel[+b.dataset.w]=!sel[+b.dataset.w]; if(!sel.some(Boolean))return; // one word at least
+    inp.dataset.short=words(inp.value).filter((_,i)=>sel[i]).join(' '); draw(true); };
+  box.oninput=e=>{ if(e.target.id!==id+'_type')return; const v=e.target.value.trim();
+    inp.dataset.short=v;
+    box.querySelectorAll('[data-w]').forEach((b,i)=>b.setAttribute('aria-pressed',String(!v&&i===0)));
+    draw(false); };
+  draw(true); }
 function refreshViewingBtn(){ const b=document.getElementById('viewingBtn');
   if(b&&S.session&&person(viewing())){ b.innerHTML='<span class="va">viewing as </span>'+esc(goesBy(viewing()));
     b.title='viewing as '+goesBy(viewing()); } }
@@ -1322,6 +1381,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     <div class="fld"><span class="flabel">Full name</span>${unknown
       ?`<input id="f_name" value="" placeholder="not known yet — type it here" ${editable?'':'disabled'}>`
       :`<input id="f_name" value="${esc(per.name)}" ${editable?'':'disabled'}>`}</div>
+    ${editable?shortNameHtml('f_name'):''}
     <div style="display:flex;gap:10px;">
       <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="f_born" value="${esc(per.born)}" placeholder="year" ${editable?'':'disabled'}></div>
       <div class="fld" style="flex:2;"><span class="flabel">Living in</span>
@@ -1366,6 +1426,7 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
     const show=m.style.display==='none'; m.style.display=show?'block':'none';
     document.getElementById('moreBtn').textContent=show?'− more':'+ more'; };
   if(per.passed)document.getElementById('moreBtn').click();
+  wireShortName('f_name',per.shortName,selfNick(pid),'the name they chose for themselves');
   const styleSel=document.getElementById('f_style');
   if(styleSel)styleSel.onchange=()=>{document.getElementById('customWrap').style.display=styleSel.value==='custom'?'block':'none';};
 }
@@ -1489,7 +1550,8 @@ window.savePerson=async(pid)=>{ const per=person(pid);
   const d=memEditable?val('f_passed').trim().toLowerCase():'';
   if(d&&d!=='unknown'&&!BORN_RE.test(d)){toast('date should be YYYY or YYYY-MM-DD');return;}
   const was=JSON.parse(JSON.stringify(per)), hadMemorial=!!per.passed;
-  if(editable){ per.name=name; per.born=val('f_born').trim();
+  if(editable){ per.name=name; per.shortName=shortFor(name,document.getElementById('f_name').dataset.short??per.shortName);
+    per.born=val('f_born').trim();
     per.country=val('f_country');
     per.gender=val('f_gender');
     per.couplePos=val('f_cpos');
@@ -1514,6 +1576,7 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
   openSheet(`
     <h3 style="font-size:18px;font-weight:600;text-align:center;margin-bottom:14px;">Add a person</h3>
     <div class="fld"><span class="flabel">Full name</span><input id="a_name" placeholder="leave empty if not known yet"></div>
+    ${shortNameHtml('a_name')}
     <div style="display:flex;gap:10px;">
       <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="a_born" placeholder="year"></div>
       <div class="fld" style="flex:1;"><span class="flabel">Gender</span>
@@ -1531,6 +1594,7 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
         <span class="itile">${ic}</span><span>${lb}${sub?`<span class="sub">${sub}</span>`:''}</span></button>`).join('')}
     <div class="btnrow"><button class="btn primary" id="a_save" style="opacity:.5;">Save</button></div>
     <p class="cap2" id="a_hint" style="margin-top:10px;">choose how they're connected, then Save. They're saved as unverified — anyone within 5 branches can care for this profile until it's claimed.</p>`);
+  wireShortName('a_name','');
   // nothing is pre-chosen: a quick "type a name, hit Save" must never invent a marriage
   let rel=null;
   sheetbody.querySelectorAll('.choice[data-rel]').forEach(b=>{
@@ -1543,7 +1607,8 @@ window.openAdd=(anchor)=>{ const a=person(anchor);
     if(!rel){toast("choose how they're connected — parent, partner, child or sibling");return;}
     if(!bornOk(document.getElementById('a_born').value.trim()))return;
     const id=(MODE==='cloud'&&crypto.randomUUID)?crypto.randomUUID():'p'+Date.now().toString(36);
-    S.persons[id]={id,name,gender:document.getElementById('a_gender').value,couplePos:'',
+    S.persons[id]={id,name,shortName:shortFor(name,document.getElementById('a_name').dataset.short),
+      gender:document.getElementById('a_gender').value,couplePos:'',
       born:document.getElementById('a_born').value.trim(),
       country:document.getElementById('a_country').value,claimedBy:null,notes:'',passed:null,photos:{},mainPhoto:'a'};
     const newRels=[];
@@ -1581,7 +1646,7 @@ function openSelf(){ const per=person(viewing());
     <div class="profile">${avatarHtml(per)}
       <div><h3>${esc(fullName(viewing()))}</h3><div class="cap2">that's you 🐻</div></div></div>
     <div class="card"><div class="label">You go by</div>
-      <div class="bignick"><input id="mynick" value="${esc(nickFor(viewing()))}" placeholder="${esc(per.name.split(' ')[0])}">
+      <div class="bignick"><input id="mynick" value="${esc(nickFor(viewing()))}" placeholder="${esc(shortNameOf(per))}">
         <button class="link" onclick="saveNick('${viewing()}')">save</button></div>
       <div class="cap2" style="margin-top:4px;">the name shown big on your own node and in "viewing as"</div></div>
     <div class="card"><div class="label">What people call you</div>${rows}</div>
@@ -1601,6 +1666,7 @@ function openSelf(){ const per=person(viewing());
     <div class="card"><div class="label">Photos — young kid · teen · adult</div>
       <div class="photorow">${['k','t','a'].map(s=>photoSlot(per,s,editable)).join('')}</div></div>
     <div class="fld"><span class="flabel">Full name</span><input id="f_name" value="${esc(per.name)}"></div>
+    ${shortNameHtml('f_name')}
     <div style="display:flex;gap:10px;">
       <div class="fld" style="flex:1;"><span class="flabel">Born</span><input id="f_born" value="${esc(per.born)}"></div>
       <div class="fld" style="flex:2;"><span class="flabel">Living in</span>
@@ -1619,17 +1685,18 @@ function openSelf(){ const per=person(viewing());
       <button class="btn secondary" onclick="openAdd('${viewing()}')">Add relative</button>
       <button class="btn primary" onclick="saveSelf()">Save</button></div>
     <p class="cap2" style="margin-top:10px;">nicknames are set by each person for themselves to use — to change what you call someone, edit it on their profile.</p>
-    <button class="link" onclick="signOut()" style="display:block;margin:10px auto 0;">sign out</button>`,viewing()); }
+    <button class="link" onclick="signOut()" style="display:block;margin:10px auto 0;">sign out</button>`,viewing());
+  wireShortName('f_name',per.shortName,selfNick(me),'your "You go by" above'); }
 window.saveSelf=async()=>{ const per=person(viewing());
   const n=document.getElementById('f_name').value.trim(); if(!n){toast('name is needed');return;}
   const born=document.getElementById('f_born').value.trim(); if(!bornOk(born))return;
   const was=JSON.parse(JSON.stringify(per));
-  per.name=n; per.born=born;
+  per.name=n; per.shortName=shortFor(n,document.getElementById('f_name').dataset.short??per.shortName); per.born=born;
   per.country=document.getElementById('f_country').value;
   per.gender=document.getElementById('f_gender').value;
   per.couplePos=document.getElementById('f_cpos').value;
-  save(); rebuild(); closeSheet(); toast('saved');
-  if(!await db.savePerson(per)){ Object.assign(per,was); undone(); } };
+  save(); rebuild(); refreshViewingBtn(); closeSheet(); toast('saved');
+  if(!await db.savePerson(per)){ Object.assign(per,was); refreshViewingBtn(); undone(); } };
 window.renameTree=async()=>{ const nuc=S.nuclei[S.session.nucleusId];
   const v=prompt('your name for this tree — only your household sees it',nuc.treeName);
   const show=()=>{ save(); document.getElementById('treename').textContent=nuc.treeName;
