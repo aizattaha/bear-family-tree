@@ -378,9 +378,10 @@ for (const [label, opts] of [['desktop', { viewport: { width: 1280, height: 800 
       await page.evaluate(() => openSelf()); await sheetOpen(page);
       check(`${L}: my own card — "On the tree: Aizat · change", and "You go by" hints "Aizat"`, await line('f_name') === 'On the tree: Aizat · change'
         && await page.getAttribute('#mynick', 'placeholder') === 'Aizat', await line('f_name'));
-      await page.fill('#mynick', 'Abang'); await page.click('#sheetbody .bignick button');
+      // a name far from the family's names for me, so the typo check (#11) doesn't ask first
+      await page.fill('#mynick', 'Kapten'); await page.click('#sheetbody .bignick button');
       await page.waitForTimeout(200);
-      check(`${L}: …once I go by "Abang", the line says so, with nothing to change`, await line('f_name') === 'On the tree: Abang — your "You go by" above'
+      check(`${L}: …once I go by "Kapten", the line says so, with nothing to change`, await line('f_name') === 'On the tree: Kapten — your "You go by" above'
         && await page.locator('#f_name_tn button').count() === 0, await line('f_name'));
     }
     check(`${L}: no errors in the page`, errors.length === 0, errors.join(' | '));
