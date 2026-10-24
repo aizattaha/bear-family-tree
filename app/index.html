@@ -159,6 +159,15 @@ input,select,textarea{font:inherit;color:var(--ink);}
 .nickrow + .nickrow{border-top:1px solid var(--muted);}
 .nickrow .nickname{font-size:15px;font-weight:500;}
 .nickrow .who{font-size:12px;color:var(--ink-soft);text-align:right;}
+/* a name the family uses that I haven't got one for yet: one tap makes it mine too */
+.nickrow.pick{align-items:center;}
+.nickrow.pick .who{flex:1;}
+.usenick{flex:none;min-height:40px;padding:0 14px;border-radius:999px;background:var(--accent-soft);
+  color:var(--primary);font-size:13px;font-weight:500;cursor:pointer;}
+/* "Others call them Tomi. You typed Tmoi." — asked before a near-miss is saved */
+#nickcheck{margin-top:10px;font-size:14px;line-height:20px;}
+#nickcheck .btnrow{margin-top:8px;}
+#nickcheck .btn{height:auto;min-height:46px;padding:6px 12px;text-align:center;}
 .bignick{display:flex;align-items:center;justify-content:space-between;gap:10px;}
 .bignick input{flex:1;background:#fff;border:0;outline:0;border-radius:12px;padding:8px 14px;
   font-size:20px;font-weight:600;color:var(--primary);min-width:0;}
@@ -615,6 +624,29 @@ function closeCircle(me){ const par=parentsOf(me);
     ...partnersOf(me).filter(x=>isCurrent(relStatus(me,x))),
     ...par.flatMap(parentsOf),                              // grandparents
     ...par.flatMap(siblingsOf).flatMap(childrenOf)]); }     // first cousins
+// names I can pick for someone, or be warned I'm near: what my close family call them
+// (never a wider-family name — those are only counted — nor one I can't see). For myself,
+// what people call me, minus "only us" names, so a pick can't make a private one public
+function pickableNicks(pid){ const me=viewing(), circle=closeCircle(me);
+  return [...new Set(Object.entries(S.nicknames)
+    .filter(([v,map])=>v!==me&&map[pid]&&(pid===me?!isPrivNick(v,me):canSeeNick(v,pid)&&(v===pid||circle.has(v))))
+    .sort(([a],[b])=>(b===pid)-(a===pid)).map(([v,map])=>map[pid]))]; }
+// steps between two names: a wrong, missing or extra letter is one, so is a swap of two
+function nickSteps(a,b){ const d=[];
+  for(let i=0;i<=a.length;i++){ d[i]=[i];
+    for(let j=1;j<=b.length;j++)d[i][j]=!i?j:Math.min(d[i-1][j]+1,d[i][j-1]+1,d[i-1][j-1]+(a[i-1]===b[j-1]?0:1),
+      i>1&&j>1&&a[i-1]===b[j-2]&&a[i-2]===b[j-1]?d[i-2][j-2]+1:Infinity); }
+  return d[a.length][b.length]; }
+// the family's name a typed one is probably a typo of ("Tmoi" → "Tomi"), else '': capitals
+// and extra spaces don't count, up to 1 step on 3-letter names and 2 on longer ones; an
+// exact match, a 1–2 letter name or a clearly different one is left alone
+function nearNick(typed,names){ if(names.includes(typed))return '';
+  const norm=s=>[...s.trim().replace(/\s+/g,' ').toLowerCase()], t=norm(typed);
+  let best='',bestD=Infinity;
+  for(const n of names){ const m=norm(n), short=Math.min(t.length,m.length); if(short<3)continue;
+    const d=nickSteps(t,m); if(d===0)return n;           // only capitals or spaces differ
+    if(d<=(short<4?1:2)&&d<bestD){ best=n; bestD=d; } }
+  return best; }
 function flagEmoji(cc){ if(!cc)return ''; return cc.toUpperCase().replace(/./g,c=>String.fromCodePoint(127397+c.charCodeAt(0))); }
 function fmtDate(d){ if(!d)return ''; if(/^\d{4}$/.test(d))return d;
   const dt=new Date(d+'T00:00:00'); if(isNaN(dt))return d;
@@ -1280,9 +1312,8 @@ function openPerson(pid){ if(pid===viewing()){ openSelf(); return; }
       if(v!==pid&&!circle.has(v)){ wider.add(n); return; }
       const who=v===pid?'what they go by':v===me?'you':displayName(v);
       (shown[n]=shown[n]||[]).push(esc(who)+(isPrivNick(v,pid)?' 🔒':'')); });
-  const more=[...wider].filter(n=>!shown[n]).length;
-  const akaRows=(Object.entries(shown).map(([n,whos])=>
-    `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.join(', ')}</span></div>`).join('')
+  const more=[...wider].filter(n=>!shown[n]).length, pick=nickFor(pid)?[]:pickableNicks(pid);
+  const akaRows=(Object.entries(shown).map(([n,whos])=>nickRowHtml(pid,n,whos,pick)).join('')
     ||`<div class="cap2">${more?'none from your close family yet':'no nicknames yet'}</div>`)
     +(more?`<div class="cap2" style="margin-top:6px;">+ ${more} more name${more===1?'':'s'} used in the wider family</div>`:'');
   const theirs=goesBy(pid), privNote=!isPrivNick(me,pid)?'off — everyone in the family tree can see this name'
@@ -1398,7 +1429,10 @@ document.getElementById('fileinput').addEventListener('change',e=>{
 // nickname saves go out one at a time, in the order they were made — a quick
 // tick-then-untick must never land on the server the other way round
 let nickQ=Promise.resolve(), nickBusy=0;
-window.saveNick=async(pid)=>{ const v=document.getElementById('mynick').value.trim(), me=viewing();
+// sure: already asked (or picked from the list), so save without checking for a typo
+window.saveNick=async(pid,sure)=>{ const v=document.getElementById('mynick').value.trim(), me=viewing();
+  const near=!sure&&v&&v!==nickFor(pid)?nearNick(v,pickableNicks(pid)):'';
+  if(near){ askNick(pid,v,near); return; }
   const box=document.getElementById('mynick_priv'), priv=!!(v&&box&&box.checked&&pid!==me);
   if(!S.nickPriv)S.nickPriv={};
   const was=(S.nicknames[me]||{})[pid], wasPriv=isPrivNick(me,pid);
@@ -1414,6 +1448,23 @@ window.saveNick=async(pid)=>{ const v=document.getElementById('mynick').value.tr
   const ok=await (nickQ=nickQ.then(()=>db.upsertNick(me,pid,v,was!==undefined,priv)));
   nickBusy--;
   if(!ok){ put(was,wasPriv); refreshViewingBtn(); undone(pid); } };
+// typed close to a name the family uses — ask before saving: "Others call them Tomi. You
+// typed Tmoi." Typing again puts the question away; saving asks again if still near
+function askNick(pid,v,near){ const inp=document.getElementById('mynick');
+  document.getElementById('nickcheck')?.remove();
+  inp.closest('.bignick').insertAdjacentHTML('afterend',`<div id="nickcheck" role="alert">
+    ${pid===viewing()?'People call you':'Others call them'} <b>${esc(near)}</b>. You typed <b>${esc(v)}</b>.
+    <div class="btnrow"><button class="btn primary" data-nick="${esc(near)}" onclick="pickNick('${pid}',this.dataset.nick,true)">Use ${esc(near)}</button>
+      <button class="btn secondary" onclick="saveNick('${pid}',true)">Keep ${esc(v)}</button></div></div>`);
+  inp.addEventListener('input',()=>document.getElementById('nickcheck')?.remove(),{once:true}); }
+// one tap on a name the family already uses makes it mine too — no typing, no typos;
+// from the list it's never "only us", from the question above the 🔒 stays as ticked
+window.pickNick=(pid,n,keepPriv)=>{ const box=document.getElementById('mynick_priv');
+  document.getElementById('mynick').value=n; if(box&&!keepPriv)box.checked=false; saveNick(pid,true); };
+function nickRowHtml(pid,n,whos,pick){ const can=pick.includes(n);
+  return `<div class="nickrow${can?' pick':''}"><span class="nickname">${esc(n)}</span><span class="who">${whos.join(', ')}</span>`
+    +(can?`<button class="usenick" data-nick="${esc(n)}" onclick="pickNick('${pid}',this.dataset.nick)"
+      aria-label="use this name: ${esc(n)}">use this name</button>`:'')+'</div>'; }
 // flipping "only us" saves straight away — there's nothing to keep private until a name is
 // typed, so an early tick is undone rather than left waiting to ride along on a later save
 window.privToggled=pid=>{ if(document.getElementById('mynick').value.trim()){ saveNick(pid); return; }
@@ -1572,8 +1623,8 @@ function openSelf(){ const per=person(viewing());
     .reduce((acc,[v,map])=>{ const n=map[me];
       (acc[n]=acc[n]||[]).push(esc(displayName(v))+(isPrivNick(v,me)?' 🔒':'')); return acc; },{});
   const anyPriv=Object.keys(S.nicknames).some(v=>v!==me&&isPrivNick(v,me)&&S.nicknames[v][me]);
-  const rows=(Object.entries(calls).map(([n,whos])=>
-    `<div class="nickrow"><span class="nickname">${esc(n)}</span><span class="who">${whos.join(', ')}</span></div>`).join('')
+  const pick=nickFor(me)?[]:pickableNicks(me);
+  const rows=(Object.entries(calls).map(([n,whos])=>nickRowHtml(me,n,whos,pick)).join('')
     ||'<div class="cap2">nobody has set a nickname for you yet</div>')
     +(anyPriv?'<div class="cap2" style="margin-top:6px;">🔒 = only us — just you and the person who calls you that can see it</div>':'');
   const editable=canEditPerson(viewing());
